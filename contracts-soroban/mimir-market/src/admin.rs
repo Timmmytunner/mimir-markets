@@ -2,6 +2,7 @@
 
 use soroban_sdk::{Address, Env};
 
+use crate::escrow;
 use crate::events;
 use crate::storage;
 use crate::types::{Error, FeePolicy, PendingFeePolicy, FEE_TIMELOCK_SECONDS, MAX_TOTAL_FEE_BPS};
@@ -42,6 +43,7 @@ pub fn initialize(
         return Err(Error::AlreadyInitialized);
     }
     validate_policy(platform_fee_bps, agent_owner_fee_bps, &platform_recipient)?;
+    escrow::require_usdc_decimals(env, &usdc_token)?;
 
     storage::mark_initialized(env);
     storage::set_owner(env, &owner);

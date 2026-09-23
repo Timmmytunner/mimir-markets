@@ -26,6 +26,7 @@ pub fn initialize(
     if storage::is_initialized(env) {
         return Err(Error::AlreadyInitialized);
     }
+    escrow::require_usdc_decimals(env, &usdc)?;
     storage::mark_initialized(env);
     storage::set_config(env, &usdc, &oracle, &fee_recipient);
     Ok(())

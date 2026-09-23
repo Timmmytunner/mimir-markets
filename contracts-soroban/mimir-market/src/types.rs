@@ -7,14 +7,24 @@ use soroban_sdk::{contracterror, contracttype, Address, BytesN, String};
 
 pub const MAX_CHALLENGERS: u32 = 100;
 
+/// Decimals of the escrow token. A Stellar Asset Contract exposes every classic
+/// asset, Circle's USDC included, with exactly 7.
+///
+/// Enforced, not assumed: `initialize` reads `decimals()` off the token and
+/// refuses any other scale, so no amount constant below can be read at a scale
+/// it was not written for.
+pub const USDC_DECIMALS: u32 = 7;
+
+/// One whole USDC in atomic units.
+pub const USDC_UNIT: i128 = 10i128.pow(USDC_DECIMALS);
+
 /// Minimum stake, in atomic USDC units.
 ///
 /// DEVIATION FROM SOLIDITY: the EVM original used `2 * 10**6` because USDC on
-/// Base is a 6-decimal ERC-20. A Stellar Asset Contract exposes classic assets
-/// with **7** decimals, so the same 2 USDC is `2 * 10**7` here. This is a
-/// placeholder pending confirmation of Circle's Stellar USDC SAC decimals — it
-/// is a single constant and trivially adjustable.
-pub const MIN_STAKE: i128 = 2_0000000; // 2 USDC @ 7 decimals
+/// Base is a 6-decimal ERC-20. The same 2 USDC at [`USDC_DECIMALS`] is
+/// `2 * 10**7` here. Against a 6-decimal token this constant would silently mean
+/// 20 USDC, which is why `initialize` rejects one.
+pub const MIN_STAKE: i128 = 2 * USDC_UNIT;
 
 pub const DEFAULT_PAYOUT_BPS: u32 = 20_000; // 2x total return
 pub const CHALLENGE_LOCK_SECONDS: u64 = 60;
@@ -246,4 +256,5 @@ pub enum Error {
     NotAChallenger = 33,
     AlreadyClaimedPayout = 34,
     ChallengersDidNotWin = 35,
+    UnsupportedDecimals = 36,
 }

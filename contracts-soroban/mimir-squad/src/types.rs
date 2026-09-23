@@ -15,6 +15,12 @@ pub const MAX_DURATION: u64 = 31_536_000; // 365 days
 
 pub const BPS_DIVISOR: i128 = 10_000;
 
+/// Decimals of the escrow token. A Stellar Asset Contract exposes every classic
+/// asset, Circle's USDC included, with exactly 7. Shares equal deposited atomic
+/// units, so this is also the scale every share is read at off-chain;
+/// `initialize` refuses a token that reports any other.
+pub const USDC_DECIMALS: u32 = 7;
+
 // ── Storage shapes ───────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -72,4 +78,5 @@ pub enum Error {
     NoFees = 22,
     UnsupportedToken = 23,
     Overflow = 24,
+    UnsupportedDecimals = 25,
 }

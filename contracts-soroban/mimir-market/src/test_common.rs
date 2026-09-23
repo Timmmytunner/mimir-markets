@@ -182,9 +182,9 @@ impl Fixture {
     }
 }
 
-/// A deliberately minimal token. Implements only the two entry points the market
-/// actually calls (`balance`, `transfer`) plus test controls, so that transfer
-/// failure and non-exact transfer can both be provoked.
+/// A deliberately minimal token. Implements only the entry points the market
+/// actually calls (`decimals`, `balance`, `transfer`) plus test controls, so that
+/// transfer failure and non-exact transfer can both be provoked.
 pub mod stub_token {
     use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Map};
 
@@ -211,6 +211,11 @@ pub mod stub_token {
     impl StubToken {
         pub fn is_stub(_env: Env) -> bool {
             true
+        }
+
+        /// USDC's scale, so the stub passes the `initialize` decimals check.
+        pub fn decimals(_env: Env) -> u32 {
+            crate::types::USDC_DECIMALS
         }
 
         pub fn mint(env: Env, to: Address, amount: i128) {
