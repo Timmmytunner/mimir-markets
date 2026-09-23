@@ -174,8 +174,9 @@ function resolveUsdcSac(deployerSecret: string): string {
   ]);
   if (Number(decimals) !== USDC_DECIMALS) {
     throw new Error(
-      `USDC SAC reports ${decimals} decimals but the contracts assume ${USDC_DECIMALS} ` +
-        `(MIN_STAKE in mimir-market/src/types.rs) — stop and reconcile before deploying`,
+      `USDC SAC reports ${decimals} decimals but the contracts require ${USDC_DECIMALS} ` +
+        `(USDC_DECIMALS in contracts-soroban/*/src/types.rs; initialize would reject it) — ` +
+        `stop and reconcile before deploying`,
     );
   }
   console.log(`    ✓ SAC ${sacId} live, decimals=${decimals}`);
