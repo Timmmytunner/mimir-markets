@@ -100,4 +100,6 @@ script (`deploy/deploy.ts`), `npm run verify:deployment` and the env validation 
 `lib/stellar.ts` are the configuration boundary; the contract additionally proves each
 stake transfer changes escrow by the exact requested atomic amount. Note that USDC on
 Stellar reports **7** decimals, not 6, and `lib/usdc.ts` confirmed this by invoking
-`decimals()` on the live SAC rather than assuming it.
+`decimals()` on the live SAC rather than assuming it. Both contracts now also enforce
+it on chain: `initialize` rejects a token whose `decimals()` is not `USDC_DECIMALS`
+(7) with `UnsupportedDecimals`.

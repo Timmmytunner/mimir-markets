@@ -9,6 +9,16 @@ Testnet USDC Stellar Asset Contract actually reports (see `lib/usdc.ts`, which
 verified it by invoking `decimals()` on the live SAC). `MIN_STAKE` is therefore
 `2_0000000`.
 
+Both contracts enforce that scale on chain rather than assuming it: `initialize`
+reads `decimals()` off the token and rejects anything but `USDC_DECIMALS` (7) with
+`UnsupportedDecimals`, and a token that cannot answer `decimals()` with
+`UnsupportedToken`. A rejected call writes nothing. `MIN_STAKE` is derived as
+`2 * USDC_UNIT`, so it cannot be read at a scale it was not written for (against a
+6-decimal token it would have meant 20 USDC). Tests: `src/test_decimals.rs` in each
+crate. They also settle every verdict with the escrow at exactly `i64::MAX`
+stroops (the most a classic Stellar account can hold), with no `Overflow` and exact
+conservation to the stroop.
+
 ## mimir-market fees
 
 Source: `contracts-soroban/mimir-market/src/fees.rs`, mirrored off-chain in

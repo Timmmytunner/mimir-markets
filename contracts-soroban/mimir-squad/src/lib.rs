@@ -23,6 +23,8 @@ pub use types::*;
 #[cfg(test)]
 mod test_common;
 #[cfg(test)]
+mod test_decimals;
+#[cfg(test)]
 mod test_lifecycle;
 #[cfg(test)]
 mod test_payouts;
