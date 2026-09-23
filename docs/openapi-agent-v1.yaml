@@ -30,7 +30,7 @@ paths:
               $ref: ../schemas/agent-api-v1.schema.json
       responses:
         "200": { description: Accepted or simulated action }
-        "400": { description: Invalid envelope }
+        "400": { description: Invalid envelope or schema validation failure }
         "401": { description: Invalid owner/operator signature }
         "403": { description: Capability, authority or budget policy rejected }
         "409": { description: Nonce replay or registration conflict }

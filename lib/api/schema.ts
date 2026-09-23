@@ -171,3 +171,32 @@ export function versioned<T>(data: T): VersionedResponse<T> {
 export function schemaVersionHeaders(): Record<string, string> {
   return { [SCHEMA_VERSION_HEADER]: String(API_SCHEMA_VERSION) };
 }
+
+// ── Agent API Drift Check ─────────────────────────────────────────────────────
+
+/**
+ * Define the expected shape of the Agent API request body for drift checking.
+ *
+ * This spec mirrors the JSON Schema in schemas/agent-api-v1.schema.json and the
+ * runtime validation in lib/agents/api.ts. It ensures the contract-first approach
+ * is enforced at the API boundary.
+ */
+export const AGENT_API_REQUEST_SPEC: ShapeSpec = {
+  version: { type: "string", required: true, oneOf: ["v1"] },
+  agentId: { type: "string", required: true, min: 3, max: 64 },
+  action: { type: "string", required: true, oneOf: ["register", "heartbeat", "proposeMarket", "createMarket", "publishReasoning", "vote", "stake", "listPositions", "listEarnings", "revoke", "dryRun"] },
+  idempotencyKey: { type: "string", required: true, min: 1, max: 128 },
+  nonce: { type: "string", required: true, min: 1, max: 128 },
+  signedAt: { type: "integer", required: true },
+  body: { type: "object", required: true },
+  signature: { type: "string", required: true, min: 16, max: 256 },
+};
+
+/**
+ * Validate the agent API request against the defined schema spec.
+ *
+ * Returns a ShapeResult indicating validity, errors, and any unexpected fields.
+ */
+export function validateAgentApiRequest(payload: unknown): ShapeResult {
+  return checkShape(payload, AGENT_API_REQUEST_SPEC);
+}

@@ -12,7 +12,7 @@
     "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 128 },
     "nonce": { "type": "string", "minLength": 1, "maxLength": 128 },
     "signedAt": { "type": "integer" },
-    "body": {},
+    "body": { "type": "object" },
     "signature": {
       "type": "string",
       "description": "Base64 Ed25519 signature over the canonical request message, as SEP-43 signMessage returns it. Mirrors the check in lib/agents/api.ts.",

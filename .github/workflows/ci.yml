@@ -36,5 +36,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:contracts
       - run: cargo build --manifest-path contracts-soroban/Cargo.toml --release --target wasm32v1-none
+      - run: npm run test:agent-api:drift
       - run: npm run test:smoke
       - run: npm run build
