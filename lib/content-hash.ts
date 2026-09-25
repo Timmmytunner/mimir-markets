@@ -46,3 +46,19 @@ export function isHash32Hex(value: string | null | undefined): boolean {
   const normalized = value.startsWith("0x") ? value.slice(2) : value;
   return /^[0-9a-fA-F]{64}$/.test(normalized);
 }
+
+/**
+ * Decode a caller-supplied 32-byte digest.
+ *
+ * Unlike `Buffer.from(value, "hex")`, this rejects truncated, overlong, odd,
+ * and non-hex input instead of partially decoding it. Contract write paths use
+ * this at the trust boundary so malformed evidence can never be silently
+ * committed as another value.
+ */
+export function decodeHash32Hex(value: string, field = "hash"): Buffer {
+  const normalized = value.startsWith("0x") ? value.slice(2) : value;
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new TypeError(`${field} must be exactly 32 bytes (64 hexadecimal characters)`);
+  }
+  return Buffer.from(normalized, "hex");
+}

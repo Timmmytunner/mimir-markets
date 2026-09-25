@@ -10,6 +10,14 @@ export {
   VSCardSkeleton,
   ArenaCardSkeleton,
 } from "./Skeleton";
+export {
+  default as AsyncPanelSkeleton,
+  CouncilPanelSkeleton,
+  MarketPanelSkeleton,
+  RivalryPanelSkeleton,
+  DashboardPanelSkeleton,
+  ExplorerPanelSkeleton,
+} from "./AsyncPanelSkeleton";
 export { default as PoolBadge } from "./PoolBadge";
 export { default as CountdownTimer } from "./CountdownTimer";
 export { default as VSStrip } from "./VSStrip";

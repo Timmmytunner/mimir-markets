@@ -402,13 +402,8 @@ fn withdrawing_from_the_wrong_side_is_rejected() {
     let id = f.market(&captain, 0);
     f.client().deposit(&a1, &id, &SIDE_A, &(10 * USDC));
 
-    // No balance on side B.
-    let err = f
-        .client()
-        .try_withdraw_before_deadline(&a1, &id, &SIDE_B, &(1 * USDC))
-        .unwrap_err()
-        .unwrap();
-    assert_eq!(err, Error::BadAmount);
+    // No balance on side B, so it returns Ok(()) idempotently.
+    f.client().withdraw_before_deadline(&a1, &id, &SIDE_B, &(1 * USDC));
 
     // And an out-of-range side is refused outright.
     let err = f
@@ -512,7 +507,24 @@ fn only_the_oracle_can_resolve() {
 }
 
 #[test]
-fn resolving_twice_is_rejected() {
+fn resolving_twice_with_same_inputs_is_idempotent() {
+    let f = Fixture::new();
+    let captain = f.user(0);
+    let a1 = f.user(100 * USDC);
+    let id = f.market(&captain, 0);
+    f.client().deposit(&a1, &id, &SIDE_A, &(10 * USDC));
+    f.advance_by(DEFAULT_DURATION);
+
+    f.client().resolve(&id, &SIDE_A);
+    f.client().resolve(&id, &SIDE_A); // Should not error
+
+    let m = f.client().get_market(&id);
+    assert!(m.resolved);
+    assert_eq!(m.result, SIDE_A);
+}
+
+#[test]
+fn resolving_twice_with_different_inputs_is_rejected() {
     let f = Fixture::new();
     let captain = f.user(0);
     let a1 = f.user(100 * USDC);
@@ -603,4 +615,48 @@ fn an_unknown_market_reads_as_not_found() {
     let stranger = Address::generate(&f.env);
     assert_eq!(f.client().get_deposit(&9, &SIDE_A, &stranger), 0);
     assert!(!f.client().has_claimed(&9, &SIDE_A, &stranger));
+}
+
+
+#[test]
+fn transition_deadline_works_for_underfunded() {
+    let f = Fixture::new();
+    let captain = f.user(0);
+    let a1 = f.user(100 * USDC);
+    let id = f.market(&captain, 0);
+    f.client().deposit(&a1, &id, &SIDE_A, &(10 * USDC));
+
+    // Too early
+    let err = f.client().try_transition_deadline(&id).unwrap_err().unwrap();
+    assert_eq!(err, Error::Locked);
+
+    f.advance_by(DEFAULT_DURATION);
+    
+    // Now past deadline. Only SIDE_A is funded. Should transition to Cancelled.
+    f.client().transition_deadline(&id);
+    let m = f.client().get_market(&id);
+    assert!(m.resolved);
+    assert_eq!(m.result, RESULT_CANCELLED);
+    
+    // Refund
+    f.client().claim(&a1, &id, &SIDE_A);
+    assert_eq!(f.token().balance(&a1), 100 * USDC);
+}
+
+#[test]
+fn transition_deadline_preserves_active_state_to_extend_ttl() {
+    let f = Fixture::new();
+    let captain = f.user(0);
+    let a1 = f.user(100 * USDC);
+    let b1 = f.user(100 * USDC);
+    let id = f.market(&captain, 0);
+    f.client().deposit(&a1, &id, &SIDE_A, &(10 * USDC));
+    f.client().deposit(&b1, &id, &SIDE_B, &(10 * USDC));
+
+    f.advance_by(DEFAULT_DURATION);
+    
+    // Both sides funded, should succeed to persist TTL bumps without resolving
+    f.client().transition_deadline(&id);
+    let m = f.client().get_market(&id);
+    assert!(!m.resolved);
 }

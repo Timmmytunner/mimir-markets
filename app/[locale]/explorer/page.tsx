@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getTranslations } from "next-intl/server";
 import ExploreClient from "./ExploreClient";
+import { ExplorerPanelSkeleton } from "@/components/ui/AsyncPanelSkeleton";
 
 type ExplorePageProps = {
   params: Promise<{ locale: string }>;
@@ -34,17 +35,6 @@ export default function ExplorePage() {
   );
 }
 function ExploreLoading() {
-  return (
-    <div className="animate-pulse space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="h-8 w-40 rounded bg-pv-surface2" />
-      <div className="h-10 w-full max-w-2xl rounded bg-pv-surface2 sm:h-12" />
-      <div className="h-11 w-full max-w-2xl rounded bg-pv-surface2" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="h-52 rounded border border-pv-ink/[0.06] bg-pv-surface2/80" />
-        <div className="h-52 rounded border border-pv-ink/[0.06] bg-pv-surface2/80" />
-        <div className="h-52 rounded border border-pv-ink/[0.06] bg-pv-surface2/80" />
-      </div>
-    </div>
-  );
+  return <ExplorerPanelSkeleton />;
 }
 

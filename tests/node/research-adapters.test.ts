@@ -29,5 +29,5 @@ test("operational telemetry counts all four roadmap dimensions", () => {
   recordCategoryReject("too_few_sources");
   recordSourceFailure("transport");
   recordSettlementAmbiguity("sports");
-  assert.deepEqual(researchMetricsSnapshot(), { coverage: { crypto: 1 }, rejects: { too_few_sources: 1 }, sourceFailures: { transport: 1 }, settlementAmbiguity: { sports: 1 } });
+  assert.deepEqual(researchMetricsSnapshot(), { coverage: { crypto: 1 }, rejects: { too_few_sources: 1 }, sourceFailures: { transport: 1 }, settlementAmbiguity: { sports: 1 }, allowlistRejects: {} });
 });

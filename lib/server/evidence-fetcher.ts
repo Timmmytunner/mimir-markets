@@ -18,7 +18,7 @@
  * evidence came via Jina rather than a structured API).
  */
 
-import { domainPolicyFromEnv } from "@/lib/research/ssrf";
+import { checkRedirectHopPolicy, domainPolicyFromEnv } from "@/lib/research/ssrf";
 import { validateHop } from "@/lib/research/gateway";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -196,6 +196,9 @@ async function tryDirectFetch(
   args: { timeoutMs: number; userAgent: string },
 ): Promise<DirectFetchResult> {
   let finalUrl = url.toString();
+  const visitedUrls = new Set<string>([finalUrl.toLowerCase()]);
+  const policy = domainPolicyFromEnv();
+
   try {
     let response = await fetch(finalUrl, {
       method: "GET",
@@ -213,12 +216,29 @@ async function tryDirectFetch(
 
     for (let hops = 0; isRedirect(response.status) && hops < MAX_REDIRECTS; hops++) {
       const location = response.headers.get("location");
-      if (!location) break;
-      const next = new URL(location, finalUrl);
+      if (!location || location.trim() === "") break;
+      let next: URL;
+      try {
+        next = new URL(location.trim(), finalUrl);
+      } catch {
+        return { ok: false, body: "", finalUrl, statusCode: response.status };
+      }
       if (next.protocol !== "https:" && next.protocol !== "http:") {
         return { ok: false, body: "", finalUrl, statusCode: response.status };
       }
-      const hop = await validateHop(next.toString(), domainPolicyFromEnv());
+
+      const redirectHop = checkRedirectHopPolicy(finalUrl, next.toString(), policy);
+      if (!redirectHop.allowed) {
+        return { ok: false, body: "", finalUrl, statusCode: response.status };
+      }
+
+      const normNext = next.toString().toLowerCase();
+      if (visitedUrls.has(normNext)) {
+        return { ok: false, body: "", finalUrl, statusCode: response.status };
+      }
+      visitedUrls.add(normNext);
+
+      const hop = await validateHop(next.toString(), policy);
       if (!hop.allowed) {
         return { ok: false, body: "", finalUrl, statusCode: response.status };
       }

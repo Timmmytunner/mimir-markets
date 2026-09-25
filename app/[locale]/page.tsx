@@ -22,6 +22,7 @@ import { BlueprintHeading } from "@/components/BlueprintGrid";
 import { Button } from "@/components/ui";
 import VSCard from "@/components/VSCard";
 import ArenaCard from "@/components/ArenaCard";
+import MarketCardGrid from "@/components/MarketCardGrid";
 import ArenaProposeCard from "@/components/ArenaProposeCard";
 import SettlementArchiveSection from "@/components/SettlementArchiveSection";
 import LiveStat from "@/components/LiveStat";
@@ -660,7 +661,10 @@ export default function HomePage() {
           <div className="relative">
             <BlueprintHeading>LIVE ARENA</BlueprintHeading>
 
-            <div className="grid grid-cols-1 gap-px border-x border-pv-border/25 bg-pv-border/25 sm:grid-cols-2 lg:grid-cols-3 [&>*]:border-0 [&>*]:h-full">
+            <MarketCardGrid
+              aria-label="Live arena market cards"
+              className="grid grid-cols-1 gap-px border-x border-pv-border/25 bg-pv-border/25 sm:grid-cols-2 lg:grid-cols-3 [&>*]:border-0 [&>*]:h-full"
+            >
               {arenaGridCards.map(({ vs, challengersCount }) => (
                 <ArenaCard
                   key={vs.id}
@@ -671,7 +675,7 @@ export default function HomePage() {
                 />
               ))}
               <ArenaProposeCard />
-            </div>
+            </MarketCardGrid>
           </div>
         </AnimatedItem>
       )}
@@ -740,11 +744,14 @@ export default function HomePage() {
           <div className="relative">
             <BlueprintHeading>MARKET EXPLORER</BlueprintHeading>
 
-            <div className="grid grid-cols-1 gap-px border-x border-pv-border/25 bg-pv-border/25 lg:grid-cols-2 [&>*]:border-0 [&>*]:h-full">
+            <MarketCardGrid
+              aria-label="Market explorer cards"
+              className="grid grid-cols-1 gap-px border-x border-pv-border/25 bg-pv-border/25 lg:grid-cols-2 [&>*]:border-0 [&>*]:h-full"
+            >
               {openVS.slice(0, 4).map((vs) => (
                 <VSCard key={vs.id} vs={vs} />
               ))}
-            </div>
+            </MarketCardGrid>
 
             {openVS.length > 4 && (
               <Link

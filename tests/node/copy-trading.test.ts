@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { copyPolicyHash, evaluateCopy, validateCopyPermission, worstCaseCopySpend, type CopyExecutionContext, type CopyPermission, type CopySignal } from "../../lib/copy-trading";
+import { buildCopyExecutionDryRun } from "../../lib/copy-execution-dry-run";
 
 // ── Every atomic figure here is 7 decimals ──────────────────────────────────
 // These fixtures were written for 6-decimal ERC-20 USDC. Stellar USDC's SAC
@@ -86,4 +87,41 @@ test("on-chain token, spender and allowance are verified, then simulation must p
   // And a case-folded token id must not match the configured one.
   assert.equal(reason(evaluateCopy(permission(), signal(), context({ configuredUsdc: USDC.toLowerCase() }))), "spend_permission_mismatch");
   assert.equal(reason(evaluateCopy(permission(), signal(), context({ simulation: { ok: false, blockNumber: 101n } }))), "simulation_failed");
+});
+
+test("dry-run reports a policy-eligible atomic stake without claiming execution", () => {
+  const { globalPaused: _, simulation: _simulation, ...snapshot } = context();
+  const result = buildCopyExecutionDryRun({ permission: permission(), signal: signal(), context: snapshot,
+    env: { MIMIR_FEATURE_COPY_TRADING: "0" } });
+  assert.equal(result.policyEligible, true);
+  assert.equal(result.stakeAtomic, "30000000");
+  assert.equal(result.fundedGateOpen, false);
+  assert.equal(result.fundedGateBlock, "feature_disabled");
+  assert.equal(result.simulation, "not_run");
+  assert.equal(result.executionReady, false);
+  assert.equal(result.transactionSubmitted, false);
+  assert.equal(result.feeQuote, null);
+});
+
+test("dry-run respects pause, stale, duplicate, cancelled and dependency inputs", () => {
+  const { globalPaused: _, simulation: _simulation, ...snapshot } = context();
+  const preview = (candidate: CopySignal, overrides: Partial<typeof snapshot> = {}, env: Record<string, string> = { MIMIR_FEATURE_COPY_TRADING: "1" }) =>
+    buildCopyExecutionDryRun({ permission: permission(), signal: candidate, context: { ...snapshot, ...overrides }, env });
+  assert.equal(preview(signal(), {}, { MIMIR_FEATURE_COPY_TRADING: "1", MIMIR_PAUSE_COPY_EXECUTION: "1" }).reason, "global_paused");
+  assert.equal(preview(signal({ deadline: NOW })).reason, "stale_signal");
+  assert.equal(preview(signal(), { existingClaimIds: new Set([7]) }).reason, "duplicate_position");
+  assert.equal(preview(signal({ marketState: "cancelled" })).reason, "market_cancelled");
+  assert.equal(preview(signal(), { onchainAllowanceAtomic: 0n }).reason, "spend_permission_mismatch");
+  assert.equal(preview(signal(), {}, { MIMIR_FEATURE_COPY_TRADING: "1", MIMIR_DISABLE_CATEGORY_CRYPTO: "1" }).reason, "category_disabled");
+});
+
+test("malformed and mismatched signals fail closed without throwing", () => {
+  assert.equal(reason(evaluateCopy(permission(), signal({ signalAgentId: "agent-c" }), context())), "signal_agent_mismatch");
+  assert.equal(reason(evaluateCopy(permission(), signal({ marketState: "resolved" }), context())), "market_closed");
+  assert.equal(reason(evaluateCopy(permission(), signal({ stakeUsdc: Number.NaN }), context())), "malformed_signal");
+  assert.equal(reason(evaluateCopy(permission(), signal({ remainingSlots: Number.NaN }), context())), "malformed_signal");
+  assert.equal(reason(evaluateCopy(permission(), signal(), context({ usage: { usedTodayUsdc: Number.NaN, usedThisWeekUsdc: 0,
+    openExposureUsdc: 0, realizedLossAtomic: "0" } }))), "malformed_context");
+  assert.equal(reason(evaluateCopy(permission(), signal(), context({ usage: { usedTodayUsdc: 1n as unknown as number,
+    usedThisWeekUsdc: 0, openExposureUsdc: 0, realizedLossAtomic: "0" } }))), "malformed_context");
 });

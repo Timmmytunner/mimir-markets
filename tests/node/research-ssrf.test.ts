@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   checkDomainPolicy,
+  checkRedirectHopPolicy,
   checkResolvedAddresses,
   checkUrl,
   domainPolicyFromEnv,
@@ -10,6 +11,7 @@ import {
   isPrivateIpv4,
   isPrivateIpv6,
   parseDomainList,
+  sanitizeHeadersForRedirect,
 } from "../../lib/research/ssrf";
 
 // ── The attacks this module exists to stop ────────────────────────────────────
@@ -209,6 +211,76 @@ test("domain lists are parsed from env, trimmed and lowercased", () => {
   const policy = domainPolicyFromEnv({
     RESEARCH_ALLOWED_DOMAINS: "coingecko.com",
     RESEARCH_DENIED_DOMAINS: "evil.com",
+    RESEARCH_ALLOW_CROSS_DOMAIN_REDIRECTS: "false",
+    RESEARCH_ALLOW_PROTOCOL_DOWNGRADE: "0",
+    RESEARCH_MAX_REDIRECTS: "4",
   });
-  assert.deepEqual(policy, { allow: ["coingecko.com"], deny: ["evil.com"] });
+  assert.deepEqual(policy, {
+    allow: ["coingecko.com"],
+    deny: ["evil.com"],
+    allowCrossDomainRedirects: false,
+    disallowProtocolDowngrade: true,
+    maxRedirects: 4,
+  });
 });
+
+// ── Redirect Hop Policy ───────────────────────────────────────────────────────
+
+test("checkRedirectHopPolicy permits valid same-origin and subdomain redirects", () => {
+  const policy = { allow: ["example.com"], deny: [] };
+  const v1 = checkRedirectHopPolicy("https://example.com/a", "https://example.com/b", policy);
+  assert.equal(v1.allowed, true);
+
+  const v2 = checkRedirectHopPolicy("https://example.com/a", "/relative/b", policy);
+  assert.equal(v2.allowed, true);
+
+  const v3 = checkRedirectHopPolicy("https://example.com/a", "https://api.example.com/b", policy);
+  assert.equal(v3.allowed, true);
+});
+
+test("checkRedirectHopPolicy blocks protocol downgrade by default", () => {
+  const policy = { allow: [], deny: [] };
+  const verdict = checkRedirectHopPolicy("https://example.com/a", "http://example.com/b", policy);
+  assert.equal(verdict.allowed, false);
+  assert.equal(verdict.reason, "protocol_downgrade");
+});
+
+test("checkRedirectHopPolicy blocks cross-domain redirects when disallowed", () => {
+  const policy = { allow: [], deny: [], allowCrossDomainRedirects: false };
+  const verdict = checkRedirectHopPolicy("https://example.com/a", "https://other.com/b", policy);
+  assert.equal(verdict.allowed, false);
+  assert.equal(verdict.reason, "cross_domain");
+});
+
+test("checkRedirectHopPolicy blocks redirects to denied domains", () => {
+  const policy = { allow: [], deny: ["blocked.com"] };
+  const verdict = checkRedirectHopPolicy("https://example.com/a", "https://blocked.com/b", policy);
+  assert.equal(verdict.allowed, false);
+  assert.equal(verdict.reason, "hostname");
+});
+
+test("sanitizeHeadersForRedirect strips auth and wallet tokens cross-origin", () => {
+  const headers = {
+    authorization: "Bearer secret",
+    cookie: "session=123",
+    "x-api-key": "key-456",
+    "x-wallet-address": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+    "x-spend-permission": "perm-789",
+    accept: "text/html",
+    "user-agent": "Mimir-Bot",
+  };
+
+  const stripped = sanitizeHeadersForRedirect(headers, "https://example.com/a", "https://other.com/b");
+  assert.equal(stripped.authorization, undefined);
+  assert.equal(stripped.cookie, undefined);
+  assert.equal(stripped["x-api-key"], undefined);
+  assert.equal(stripped["x-wallet-address"], undefined);
+  assert.equal(stripped["x-spend-permission"], undefined);
+  assert.equal(stripped.accept, "text/html");
+  assert.equal(stripped["user-agent"], "Mimir-Bot");
+
+  const preserved = sanitizeHeadersForRedirect(headers, "https://example.com/a", "https://example.com/b");
+  assert.equal(preserved.authorization, "Bearer secret");
+  assert.equal(preserved["x-wallet-address"], "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
+});
+

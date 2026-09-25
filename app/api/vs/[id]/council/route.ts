@@ -32,6 +32,7 @@ import {
   type PersonaSpec,
 } from "@/agents/council/personas";
 import { scValToNative } from "@stellar/stellar-sdk";
+import { makeContractFreshness, type VSCacheFreshness } from "@/lib/vs-freshness";
 
 export const revalidate = 20;
 
@@ -54,6 +55,7 @@ interface CouncilResponse {
   stakedCount: number;
   totalUsdc:  number;
   votes:      PersonaVote[];
+  cache:      VSCacheFreshness;
 }
 
 /**
@@ -108,6 +110,7 @@ export async function GET(
     stakedCount: 0,
     totalUsdc: 0,
     votes: [],
+    cache: makeContractFreshness(),
   };
 
   if (!isMarketConfigured()) {
@@ -157,6 +160,7 @@ export async function GET(
     stakedCount,
     totalUsdc,
     votes,
+    cache: makeContractFreshness(),
   };
   return NextResponse.json(body, {
     headers: { "cache-control": "public, s-maxage=20, stale-while-revalidate=60" },

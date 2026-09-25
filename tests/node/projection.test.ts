@@ -232,13 +232,17 @@ test("one address cannot hold two positions on a claim", () => {
   assert.equal(claim.totalChallengerStakeUnits, 5_000n);
 });
 
-test("addresses are lower-cased so a checksum variant is not a second row", () => {
+test("addresses are preserved because Stellar strkeys are case-sensitive", () => {
   const result = project([
     created(1, 100),
     challenged(1, ALICE.toUpperCase(), 5_000n, 101),
     challenged(1, ALICE, 9_000n, 102),
   ]);
-  assert.equal(result.claims.get(1)!.challengers.length, 1);
+  assert.equal(result.claims.get(1)!.challengers.length, 2);
+  assert.deepEqual(
+    new Set(result.claims.get(1)!.challengers.map((entry) => entry.address)),
+    new Set([ALICE, ALICE.toUpperCase()]),
+  );
 });
 
 // ── Gaps ──────────────────────────────────────────────────────────────────────

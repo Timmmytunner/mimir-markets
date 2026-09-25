@@ -15,6 +15,7 @@ import { StrKey } from "@stellar/stellar-sdk";
 import { useLocale, useMessages, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/navigation";
 import { useWallet } from "@/lib/wallet";
+import { evaluateUsdcTrustlineGate } from "@/lib/usdcTrustlineGate";
 import {
   createClaim,
   createRematch,
@@ -50,6 +51,7 @@ import {
   MIN_STAKE,
   PREFILLS,
   ZERO_ADDRESS,
+  formatDeadline,
   normalizeCategoryId,
   normalizeResolutionSource,
 } from "@/lib/constants";
@@ -57,7 +59,6 @@ import {
   SETTLEMENT_MODE_POLICY,
   selectableSettlementModes,
   settlementModeToOddsMode,
-  validateMode,
   type ProductModifier,
   type SettlementMode,
 } from "@/lib/market-modes";
@@ -65,6 +66,7 @@ import type {
   SourceClaimDraftCandidate,
   SourceClaimDraftResponse,
 } from "@/lib/claimDrafts";
+import { validateClaimCreationBeforeSign } from "@/lib/claimCreationValidation";
 import {
   generatePrivateInviteKey,
   rememberPrivateInviteKey,
@@ -81,8 +83,19 @@ import {
 import { toast } from "sonner";
 import PageTransition, { AnimatedItem } from "@/components/PageTransition";
 import { GlassCard, Button, Input, ListboxField } from "@/components/ui";
+import {
+  UsdcTrustlineGate,
+  useUsdcTrustline,
+} from "@/components/wallet/UsdcTrustlineGate";
 import ClaimStrengthCard from "@/components/ClaimStrengthCard";
 import CreateChallengeTicket from "@/components/vs/CreateChallengeTicket";
+import {
+  CREATE_DESKTOP_CTA_WRAP_CLASS,
+  CREATE_MOBILE_CTA_BAR_CLASS,
+  CREATE_PAGE_SHELL_CLASS,
+  CREATE_STAKE_CUSTOM_CELL_CLASS,
+  CREATE_STAKE_PRESET_GRID_CLASS,
+} from "@/lib/createFormResponsive";
 import { BlueprintHeading } from "@/components/BlueprintGrid";
 import CreateMockFundingOverlay, {
   type CreateMockOverlayPhase,
@@ -184,7 +197,9 @@ export default function CreatePage() {
   const router = useRouter();
   const pathname = usePathname();
   const { address, isConnected, connect, signer } = useWallet();
+  const trustline = useUsdcTrustline();
   const t = useTranslations("create");
+  const tWallet = useTranslations("wallet");
   const tc = useTranslations("common");
   const tQuality = useTranslations("quality");
   const tCat = useTranslations("categories");
@@ -273,6 +288,15 @@ export default function CreatePage() {
   const mockFlowTimersRef = useRef<number[]>([]);
   /** `/vs/create?demo=1`: flujo sin wallet ni contrato (no compatible con rematch). */
   const isCreateDemoSession = isCreateDemoUrl && rematchId === null;
+  const createTrustlineGate = evaluateUsdcTrustlineGate({
+    action: rematchId === null ? "create" : "rematch",
+    status: trustline.status,
+    loading: trustline.loading,
+    stale: trustline.stale,
+    isConnected,
+    hasSigner: Boolean(signer),
+  });
+  const createTrustlineBlocked = !isCreateDemoSession && !createTrustlineGate.allowed;
   const ticketWalletAddress =
     isCreateDemoSession && !address ? MOCK_DEMO_CREATOR_ADDRESS : address;
   /** Evita mismatch de hidratación: fechas relativas y `min` del input dependen de zona horaria y del reloj del cliente. */
@@ -1051,91 +1075,99 @@ export default function CreatePage() {
   ]);
 
   async function handleSubmit() {
-    if (!question || !creatorPos || !opponentPos) {
-      toast.error(t("fillAllFields"));
-      return;
-    }
-
     const isDemoCreate = isCreateDemoSession;
 
-    if (!isDemoCreate && (!isConnected || !address)) {
-      toast.error(t("connectWalletFirst"));
+    // Validate the claim draft before any wallet signing / gas spend.
+    const preflight = validateClaimCreationBeforeSign({
+      question,
+      creatorPosition: creatorPos,
+      opponentPosition: opponentPos,
+      resolutionUrl: normalizedSourceUrl || url,
+      settlementRule,
+      requiresExplicitSettlementRule,
+      stake,
+      minStake: MIN_STAKE,
+      customDeadline,
+      marketType,
+      settlementMode,
+      poolSlots,
+      challengerPayoutBps,
+      isDemo: isDemoCreate,
+      isConnected,
+      address,
+      hasSigner: Boolean(signer),
+      moderation: CLAIM_MODERATION_ENABLED
+        ? {
+            enabled: true,
+            loading: moderationLoading,
+            currentKey: moderationKey,
+            approvedKey: lastModerationKeyRef.current,
+            decision:
+              moderationDecision === "allow" ||
+              moderationDecision === "review" ||
+              moderationDecision === "block"
+                ? moderationDecision
+                : "",
+          }
+        : undefined,
+    });
+
+    if (!preflight.ok || !preflight.parsed) {
+      if (preflight.status === "loading") {
+        return;
+      }
+      if (preflight.detail && !preflight.messageKey) {
+        toast.error(preflight.detail);
+        return;
+      }
+      if (preflight.messageKey) {
+        toast.error(
+          preflight.messageParams
+            ? t(preflight.messageKey, preflight.messageParams as never)
+            : t(preflight.messageKey)
+        );
+      }
       return;
     }
 
-    // Creating a market means signing a transaction, so an address alone is not
-    // enough. A connected wallet that cannot sign is a real state (a session
-    // restored from storage against a wallet the user has since removed), and it
-    // has to be caught here rather than as an opaque throw from lib/contract.ts.
-    if (!isDemoCreate && !signer) {
-      toast.error(t("walletCannotSign"));
+    if (!isDemoCreate && !createTrustlineGate.allowed) {
+      toast.error(tWallet(createTrustlineGate.messageKey));
       return;
     }
 
-    if (!Number.isFinite(stake) || stake < MIN_STAKE) {
-      toast.error(t("invalidStakeMin", { amount: MIN_STAKE }));
-      return;
-    }
+    const {
+      question: parsedQuestion,
+      creatorPosition: parsedCreatorPos,
+      opponentPosition: parsedOpponentPos,
+      resolutionUrl: parsedResolutionUrl,
+      settlementRule: parsedSettlementRule,
+      deadlineTimestamp,
+      stake: parsedStake,
+      marketType: normalizedMarketType,
+      maxChallengers: normalizedMaxChallengers,
+      challengerPayoutBps: normalizedChallengerPayoutBps,
+    } = preflight.parsed;
 
-    if (!customDeadline) {
-      toast.error(t("completeExactDeadline"));
-      return;
-    }
-
-    const deadlineTimestamp = Math.floor(new Date(customDeadline).getTime() / 1000);
-
-    if (!Number.isFinite(deadlineTimestamp) || deadlineTimestamp <= Math.floor(Date.now() / 1000)) {
-      toast.error(t("invalidDeadline"));
-      return;
-    }
-
-    const normalizedMarketType = normalizeSupportedMarketType(marketType);
     // The chain stores the loose strings; the canonical mode decides what they
     // are. A duel is escrowed as a one-slot pool — see lib/market-modes.ts.
     const normalizedOddsMode = settlementModeToOddsMode(settlementMode);
 
-    if (!normalizedSourceUrl) {
-      toast.error(t("sourceRequired"));
-      return;
-    }
-
-    if (requiresExplicitSettlementRule && settlementRule.trim().length < 16) {
-      toast.error(t("settlementRuleRequired"));
-      return;
-    }
-
-    const normalizedMaxChallengers =
-      SETTLEMENT_MODE_POLICY[settlementMode].maxChallengers ?? Math.max(2, Math.floor(poolSlots));
-
-    // Reject impossible combinations with the same policy the detail page and the
-    // market-creator use, before spending gas on a revert.
-    const modeCheck = validateMode({
-      subjectType: normalizedMarketType,
-      settlementMode,
-      maxChallengers: normalizedMaxChallengers,
-      creatorStake: stake,
-      challengerPayoutBps: settlementMode === "fixed_odds" ? challengerPayoutBps : 0,
-    });
-    if (!modeCheck.ok) {
-      toast.error(modeCheck.errors[0]);
-      return;
-    }
     const inviteKey = isPrivate ? generatePrivateInviteKey() : "";
     const params: CreateClaimParams = {
-      question,
-      creator_position: creatorPos,
-      counter_position: opponentPos,
-      resolution_url: normalizedSourceUrl,
+      question: parsedQuestion,
+      creator_position: parsedCreatorPos,
+      counter_position: parsedOpponentPos,
+      resolution_url: parsedResolutionUrl,
       deadline: deadlineTimestamp,
-      stake_amount: stake,
+      stake_amount: parsedStake,
       category,
       market_type: normalizedMarketType,
       odds_mode: normalizedOddsMode,
       // Zero for every mode but fixed odds: a non-zero bps on a pool market is
       // rejected by validateMode, and the contract would price payouts off it.
-      challenger_payout_bps: settlementMode === "fixed_odds" ? challengerPayoutBps : 0,
+      challenger_payout_bps: normalizedChallengerPayoutBps,
       handicap_line: "",
-      settlement_rule: settlementRule.trim(),
+      settlement_rule: parsedSettlementRule,
       max_challengers: normalizedMaxChallengers,
       visibility,
       invite_key: inviteKey,
@@ -1146,6 +1178,11 @@ export default function CreatePage() {
       if (!moderationOk) {
         return;
       }
+    }
+
+    if (!isDemoCreate && !createTrustlineGate.allowed) {
+      toast.error(tWallet(createTrustlineGate.messageKey));
+      return;
     }
 
     let releaseLock: (() => void) | undefined;
@@ -1348,7 +1385,7 @@ export default function CreatePage() {
         subtitleSuccess={t("mockOverlaySuccessHint")}
       />
       <PageTransition>
-      <div className="mx-auto w-full max-w-[1280px] px-4 pb-12 sm:px-6">
+      <div className={CREATE_PAGE_SHELL_CLASS}>
         <AnimatedItem>
           <div className="mb-8 w-full sm:mb-10">
           {rematchId && (
@@ -1568,15 +1605,21 @@ export default function CreatePage() {
                                   {t("sourceDraftDeadline")}
                                 </div>
                                 <div className="mt-2 text-sm font-medium text-pv-text/90">
-                                  {hasDeadline
-                                    ? `${draftDeadline.toLocaleString(locale === "en" ? "en-US" : "es-AR", {
-                                        year: "numeric",
-                                        month: "short",
-                                        day: "numeric",
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      })} (${candidate.timezone})`
-                                    : candidate.deadlineAt}
+                                  {hasDeadline ? (
+                                    <>
+                                      {formatDeadline(
+                                        Math.floor(draftDeadline.getTime() / 1000),
+                                        locale === "en" ? "en" : "es"
+                                      )}
+                                      {candidate.timezone ? (
+                                        <span className="mt-1 block text-[11px] font-normal text-pv-muted">
+                                          Settlement rule timezone: {candidate.timezone}
+                                        </span>
+                                      ) : null}
+                                    </>
+                                  ) : (
+                                    candidate.deadlineAt
+                                  )}
                                 </div>
                               </div>
                               <div className="rounded-xl border border-pv-ink/[0.08] bg-pv-bg/60 p-3">
@@ -1804,7 +1847,7 @@ export default function CreatePage() {
                 </span>
                 {t("stakeSectionTitle")}
               </h3>
-              <div className="grid grid-cols-5 gap-2">
+              <div className={CREATE_STAKE_PRESET_GRID_CLASS}>
                 {STAKE_PRESET_AMOUNTS.map((amount) => (
                   <motion.button
                     key={amount}
@@ -1824,7 +1867,7 @@ export default function CreatePage() {
                   </motion.button>
                 ))}
                 <div
-                  className={`flex min-h-[2.75rem] w-full min-w-0 items-center justify-center rounded-lg border px-1.5 py-1.5 transition-[border-color,background-color,color,box-shadow] sm:min-h-[3.25rem] sm:px-2 sm:py-2 ${
+                  className={`flex ${CREATE_STAKE_CUSTOM_CELL_CLASS} items-center justify-center rounded-lg border px-1.5 py-1.5 transition-[border-color,background-color,color,box-shadow] sm:min-h-[3.25rem] sm:px-2 sm:py-2 ${
                     customStakeFocused || !isPresetStakeAmount(stake)
                       ? "border-pv-emerald bg-pv-emerald/[0.12] text-pv-emerald shadow-[0_0_16px_-8px_rgba(51,79,169,0.3)]"
                       : "border border-pv-ink/[0.12] bg-pv-surface text-pv-muted"
@@ -2397,6 +2440,10 @@ export default function CreatePage() {
                     </div>
                   </div>
                 ) : null}
+                {!isCreateDemoSession && isConnected && (
+                  <UsdcTrustlineGate trustline={trustline} className="mb-3" />
+                )}
+                <div className={CREATE_DESKTOP_CTA_WRAP_CLASS}>
                 {isConnected || isCreateDemoSession ? (
                   <Button
                     variant="primary"
@@ -2406,7 +2453,7 @@ export default function CreatePage() {
                       mockOverlayPhase === "loading" ||
                       moderationLoading
                     }
-                    disabled={isFormMockBusy || moderationLoading}
+                    disabled={isFormMockBusy || moderationLoading || createTrustlineBlocked}
                     className="rounded-2xl py-5 font-display text-sm font-bold uppercase tracking-widest"
                   >
                     {mockOverlayPhase === "loading" || loading ? (
@@ -2435,9 +2482,53 @@ export default function CreatePage() {
                 <p className="text-center text-[9px] font-bold uppercase tracking-widest text-pv-muted/55 leading-snug">
                   {t("ticketSignatureNote")}
                 </p>
+                </div>
               </div>
             </AnimatedItem>
           </aside>
+        </div>
+
+        <div className={CREATE_MOBILE_CTA_BAR_CLASS} data-testid="create-mobile-cta">
+          <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-2">
+            {isConnected || isCreateDemoSession ? (
+              <Button
+                variant="primary"
+                onClick={handleSubmit}
+                loading={
+                  loading ||
+                  mockOverlayPhase === "loading" ||
+                  moderationLoading
+                }
+                disabled={isFormMockBusy || moderationLoading || createTrustlineBlocked}
+                className="min-h-[44px] rounded-2xl py-4 font-display text-sm font-bold uppercase tracking-widest"
+              >
+                {mockOverlayPhase === "loading" || loading ? (
+                  mockOverlayPhase === "loading"
+                    ? t("mockOverlayFunding")
+                    : t("funding")
+                ) : (
+                  <>
+                    <span>
+                      {rematchId
+                        ? t("createRematchAndFund", { amount: stake })
+                        : t("createAndFund", { amount: stake })}
+                    </span>
+                    <Zap className="size-5 shrink-0" aria-hidden />
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={connect}
+                className="min-h-[44px] rounded-2xl py-4 font-display text-sm font-bold uppercase tracking-widest"
+              >
+                {t("connectWallet")}
+              </Button>
+            )}
+            <p className="text-center text-[9px] font-bold uppercase tracking-widest text-pv-muted/55 leading-snug">
+              {t("ticketSignatureNote")}
+            </p>
+          </div>
         </div>
       </div>
     </PageTransition>

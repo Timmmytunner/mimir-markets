@@ -21,15 +21,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ExternalLink, ShieldCheck } from "lucide-react";
 
 import {
   buildFeedView,
   confidencePercent,
-  freshnessLabel,
-  shortHash,
   type FeedItem,
 } from "@/lib/reasoning/feed-view";
+import ResearchSourceCitations from "@/components/research/ResearchSourceCitations";
 
 const REFRESH_MS = 30_000;
 
@@ -160,39 +158,19 @@ export default function ReasoningFeed({ claimId }: { claimId: number }) {
                     )}
 
                     {entry.evidence.length > 0 ? (
-                      <ul className="mt-3 space-y-1">
-                        {entry.evidence.map((ref) => {
-                          const fresh = freshnessLabel(ref, nowMs);
-                          return (
-                            <li
-                              key={`${entry.eventId}:${ref.contentHash}:${ref.url}`}
-                              className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-pv-muted"
-                            >
-                              <a
-                                href={ref.url}
-                                target="_blank"
-                                rel="noopener noreferrer nofollow"
-                                className="inline-flex items-center gap-1 text-pv-text/90 underline decoration-white/20 hover:decoration-white/60"
-                              >
-                                {ref.domain}
-                                <ExternalLink size={11} />
-                              </a>
-                              {fresh && (
-                                <span className="tabular-nums">
-                                  {t(`fresh_${fresh.unit}`, { value: fresh.value })}
-                                </span>
-                              )}
-                              {ref.trustTier && <span>{ref.trustTier}</span>}
-                              {/* The hash is what makes the citation checkable if the
-                                  page later changes under the same URL. */}
-                              <span className="inline-flex items-center gap-1 font-mono">
-                                <ShieldCheck size={11} />
-                                {shortHash(ref.contentHash)}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                      <div className="mt-3">
+                        <ResearchSourceCitations
+                          sources={entry.evidence.map((ref) => ({
+                            url: ref.url,
+                            domain: ref.domain,
+                            trustTier: ref.trustTier,
+                            contentHash: ref.contentHash,
+                            capturedAt: ref.capturedAt,
+                            freshnessSeconds: ref.freshnessSeconds,
+                          }))}
+                          nowMs={nowMs}
+                        />
+                      </div>
                     ) : (
                       <p className="mt-3 text-xs text-amber-200/90">{t("noEvidence")}</p>
                     )}

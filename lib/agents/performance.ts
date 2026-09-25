@@ -11,7 +11,7 @@
  * not settled is not a gain in either direction.
  */
 
-import { USDC_DECIMALS, USDC_UNIT } from "@/lib/usdc";
+import { USDC_DECIMALS, USDC_UNIT, unitsToUsdc } from "@/lib/usdc";
 
 export type AgentTradeRole = "creator" | "challenger";
 
@@ -26,7 +26,7 @@ export interface AgentTradeRow {
   potentialPayout: number;
   state: string;
   winnerSide: string;
-  /** Milliseconds; the index stamps this when the row last changed. */
+  /** Milliseconds; chain settlement time when projected, otherwise the row update time. */
   settledAt: number;
   category: string;
   question: string;
@@ -202,6 +202,6 @@ export function cumulativePnlPoints(
   let running = 0n;
   return settled.map((result) => {
     running += result.pnlAtomic;
-    return { timestamp: result.settledAt, value: Number(running) / 1_000_000 };
+    return { timestamp: result.settledAt, value: unitsToUsdc(running) };
   });
 }

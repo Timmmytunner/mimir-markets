@@ -35,11 +35,20 @@ const FORBIDDEN = [
   ["coinbase paymaster", /\bpaymaster\b/i],
   ["MetaMask", /\bMetaMask\b/i],
   ["WalletConnect", /\bWalletConnect\b/i],
+  ["Stellar Secret Seed", /S[A-Z2-7]{55}/],
+  ["GitHub Token", /gh[ps]_[a-zA-Z0-9]{36}/],
+  ["Stripe/Generic Secret (sk_live_)", /sk_live_[a-zA-Z0-9]{20,}/],
+  ["Anthropic API Key", /sk-ant-[a-zA-Z0-9_-]{20,}/],
+  ["Groq API Key", /gsk_[a-zA-Z0-9_-]{20,}/],
+  ["Google API Key (AIza)", /AIza[a-zA-Z0-9_-]{35}/],
+  ["PostHog API Key", /phc_[a-zA-Z0-9_-]{43}/]
 ];
 
 const SKIP_FILES = new Set([
   "scripts/check-forbidden-terms.mjs",
   "lib/xmtp/identity.ts",
+  "tests/node/x402-fixtures.ts",
+  "tests/node/security-headers.test.ts"
 ]);
 
 const files = execSync("git ls-files", { encoding: "utf8" })

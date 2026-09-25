@@ -9,6 +9,7 @@ import {
   authorizeAction,
   buildChallengeMessage,
   defaultLimits,
+  evaluateRegistrationReplay,
   grantCapability,
   isAgentCapability,
   metadataHash,
@@ -449,4 +450,80 @@ test("metadata is hashed so an off-chain document cannot be swapped silently", (
   // SHA-256, bare hex, no `0x` prefix — Soroban's `env.crypto().sha256()` is what
   // a contract could recompute, and Stellar tooling writes hex unprefixed.
   assert.match(a, /^[0-9a-f]{64}$/);
+});
+
+// ── Idempotent registration ───────────────────────────────────────────────────
+
+test("re-registering the same owner/operator/payout is an idempotent success", () => {
+  const existing = agent();
+  const verdict = evaluateRegistrationReplay(existing, {
+    ownerWallet: OWNER,
+    operatorWallet: OPERATOR,
+    payoutWallet: OWNER,
+  });
+  assert.equal(verdict.ok, true);
+});
+
+test("whitespace on wallets does not break idempotent registration matching", () => {
+  const existing = agent();
+  const verdict = evaluateRegistrationReplay(existing, {
+    ownerWallet: `  ${OWNER}  `,
+    operatorWallet: `\t${OPERATOR}`,
+    payoutWallet: ` ${OWNER}`,
+  });
+  assert.equal(verdict.ok, true);
+});
+
+test("a different owner claiming the same agentId is a conflict", () => {
+  const verdict = evaluateRegistrationReplay(agent(), {
+    ownerWallet: STRANGER,
+    operatorWallet: OPERATOR,
+    payoutWallet: STRANGER,
+  });
+  assert.equal(verdict.ok, false);
+  if (!verdict.ok) assert.equal(verdict.reason, "owner_mismatch");
+});
+
+test("a different operator on an existing agentId is a conflict", () => {
+  const verdict = evaluateRegistrationReplay(agent(), {
+    ownerWallet: OWNER,
+    operatorWallet: STRANGER,
+    payoutWallet: OWNER,
+  });
+  assert.equal(verdict.ok, false);
+  if (!verdict.ok) assert.equal(verdict.reason, "operator_mismatch");
+});
+
+test("a different payout wallet on an existing agentId is a conflict", () => {
+  const verdict = evaluateRegistrationReplay(agent(), {
+    ownerWallet: OWNER,
+    operatorWallet: OPERATOR,
+    payoutWallet: STRANGER,
+  });
+  assert.equal(verdict.ok, false);
+  if (!verdict.ok) assert.equal(verdict.reason, "payout_mismatch");
+});
+
+test("revoked agents cannot be revived by an idempotent register replay", () => {
+  const revoked = revokeAgent(agent(), { requestedBy: OWNER, reason: "key leak", at: NOW });
+  assert.equal(revoked.ok, true);
+  if (!revoked.ok) return;
+  const verdict = evaluateRegistrationReplay(revoked.agent, {
+    ownerWallet: OWNER,
+    operatorWallet: OPERATOR,
+    payoutWallet: OWNER,
+  });
+  assert.equal(verdict.ok, false);
+  if (!verdict.ok) assert.equal(verdict.reason, "revoked");
+});
+
+test("capability drift does not make a matching identity look like a conflict", () => {
+  // Clients often re-send a registration body after grants changed server-side.
+  const existing = agent({ capabilities: ["researcher", "market_creator", "council_juror"] });
+  const verdict = evaluateRegistrationReplay(existing, {
+    ownerWallet: OWNER,
+    operatorWallet: OPERATOR,
+    payoutWallet: OWNER,
+  });
+  assert.equal(verdict.ok, true);
 });

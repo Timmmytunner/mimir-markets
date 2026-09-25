@@ -32,6 +32,11 @@ import {
 } from "@/lib/contract";
 import { useWallet } from "@/lib/wallet";
 import { acquireTxLock } from "@/lib/tx-lock";
+import { evaluateUsdcTrustlineGate } from "@/lib/usdcTrustlineGate";
+import {
+  UsdcTrustlineGate,
+  useUsdcTrustline,
+} from "@/components/wallet/UsdcTrustlineGate";
 import { Button, GlassCard } from "@/components/ui";
 
 interface Quote {
@@ -50,7 +55,17 @@ export default function ClaimPayoutCard({
   onCollected?: () => void;
 }) {
   const t = useTranslations("vsDetail");
-  const { address, signer } = useWallet();
+  const tWallet = useTranslations("wallet");
+  const { address, isConnected, signer } = useWallet();
+  const trustline = useUsdcTrustline();
+  const trustlineGate = evaluateUsdcTrustlineGate({
+    action: "payout",
+    status: trustline.status,
+    loading: trustline.loading,
+    stale: trustline.stale,
+    isConnected,
+    hasSigner: Boolean(signer),
+  });
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(false);
@@ -87,8 +102,16 @@ export default function ClaimPayoutCard({
   }, [refresh]);
 
   async function collect() {
-    if (!signer || !address) {
-      toast.error(t("walletCannotSign"));
+    if (!isConnected || !address || !signer) {
+      toast.error(
+        !isConnected || !address
+          ? tWallet("connectWalletFirst")
+          : t("walletCannotSign"),
+      );
+      return;
+    }
+    if (!trustlineGate.allowed) {
+      toast.error(tWallet(trustlineGate.messageKey));
       return;
     }
     let release: (() => void) | undefined;
@@ -147,6 +170,7 @@ export default function ClaimPayoutCard({
 
   return (
     <GlassCard glass className="!rounded-2xl border border-pv-emerald/35">
+      <UsdcTrustlineGate trustline={trustline} className="mb-3" />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-pv-text">{t("claimPayoutTitle")}</div>
@@ -158,7 +182,13 @@ export default function ClaimPayoutCard({
             })}
           </p>
         </div>
-        <Button variant="emerald" onClick={collect} loading={busy} fullWidth={false}>
+        <Button
+          variant="emerald"
+          onClick={collect}
+          loading={busy}
+          disabled={!trustlineGate.allowed}
+          fullWidth={false}
+        >
           {busy
             ? t("claimPayoutPending")
             : t("claimPayoutCta", { net: quote.net.toFixed(2) })}

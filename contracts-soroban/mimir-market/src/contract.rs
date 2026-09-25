@@ -9,8 +9,8 @@ use crate::escrow;
 use crate::resolve;
 use crate::storage;
 use crate::types::{
-    Challenger, Claim, ClaimFeeView, CreateParams, Error, FeePolicy, MarketConfig, PayoutQuote,
-    PendingFeePolicy, PlatformStats, WinnerSide,
+    Challenger, ChallengerPage, Claim, ClaimFeeView, CreateParams, Error, FeePolicy, MarketConfig,
+    PayoutQuote, PendingFeePolicy, PlatformStats, Verdict, WinnerSide,
 };
 
 #[contract]
@@ -99,6 +99,33 @@ impl MimirMarket {
         resolve::resolve_claim(&env, claim_id, winner_side, summary, confidence, evidence_hash)
     }
 
+    /// Versioned verdict entry point. Identical settlement semantics to
+    /// `resolve_claim`, but the oracle submits a `Verdict` carrying its explicit
+    /// encoding version. Unknown versions are refused with
+    /// `Error::UnsupportedVerdictVersion` and leave the claim untouched.
+    pub fn resolve_claim_versioned(
+        env: Env,
+        claim_id: u64,
+        verdict: Verdict,
+        summary: String,
+        confidence: u32,
+        evidence_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        resolve::resolve_claim_versioned(
+            &env,
+            claim_id,
+            &verdict,
+            summary,
+            confidence,
+            evidence_hash,
+        )
+    }
+
+    
+    pub fn transition_deadline(env: Env, claim_id: u64) -> Result<(), Error> {
+        claims::transition_deadline(&env, claim_id)
+    }
+
     pub fn cancel_claim(env: Env, claim_id: u64) -> Result<(), Error> {
         claims::cancel_claim(&env, claim_id)
     }
@@ -136,6 +163,20 @@ impl MimirMarket {
         storage::get_claim(&env, claim_id)
     }
 
+    /// The claim's verdict with its explicit encoding version.
+    ///
+    /// Refuses with `Error::UnsupportedVerdictVersion` if the stored verdict was
+    /// written by an encoding this contract does not understand, and with
+    /// `Error::ClaimNotResolved` if the claim has not been resolved.
+    pub fn get_verdict(env: Env, claim_id: u64) -> Result<Verdict, Error> {
+        resolve::get_verdict(&env, claim_id)
+    }
+
+    /// Convenience view returning only the decoded verdict side.
+    pub fn get_verdict_side(env: Env, claim_id: u64) -> Result<WinnerSide, Error> {
+        resolve::get_verdict(&env, claim_id)?.decode()
+    }
+
     pub fn get_claim_market_config(env: Env, claim_id: u64) -> Result<MarketConfig, Error> {
         Ok(storage::get_claim(&env, claim_id)?.market)
     }
@@ -155,6 +196,27 @@ impl MimirMarket {
     /// already pulled their settlement.
     pub fn get_challenger_list(env: Env, claim_id: u64) -> Vec<Challenger> {
         storage::challengers(&env, claim_id)
+    }
+
+    /// A paginated window into the challenger roster.
+    ///
+    /// Returns up to `limit` entries starting at `offset` (0-based).  
+    /// `limit = 0` returns all entries from `offset` to the end of the roster —
+    /// identical to `get_challenger_list` when `offset = 0`.
+    ///
+    /// The `ChallengerPage` response always carries `total` (full roster length)
+    /// so callers can detect the last page without issuing an extra empty fetch.
+    ///
+    /// Neither `offset` nor `limit` can cause a panic: an `offset` beyond the
+    /// end of the roster returns an empty `items` slice with `total` set
+    /// correctly.
+    pub fn get_challengers_page(
+        env: Env,
+        claim_id: u64,
+        offset: u32,
+        limit: u32,
+    ) -> ChallengerPage {
+        storage::challengers_page(&env, claim_id, offset, limit)
     }
 
     /// What `claim_challenger_payout` would pay this challenger right now.

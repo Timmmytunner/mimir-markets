@@ -214,6 +214,14 @@ export function paidRoute<T>(
         { status: 503, headers: { "retry-after": "60" } },
       ) as NextResponse<T>;
     }
+    const { authorizeRequest } = await import("@/lib/api/policy");
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+    const wallet = paymentPayer(req) || undefined;
+    const tier = wallet ? "authenticated_user" : "public_read";
+    const rlGate = authorizeRequest(tier, { route: req.nextUrl.pathname, ip, wallet });
+    if (!rlGate.allowed && rlGate.error) {
+      return NextResponse.json(rlGate.error.body, { status: rlGate.error.status, headers: rlGate.error.headers }) as NextResponse<T>;
+    }
     return guarded(req);
   };
 

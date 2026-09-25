@@ -1,0 +1,72 @@
+name: release-sbom
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  sbom:
+    name: Publish release SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the published release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate CycloneDX SBOM from package-lock.json
+        id: sbom
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          OUT="sbom/mimir-${TAG}.cdx.json"
+          VERSION="${TAG#v}"
+          node scripts/generate-release-sbom.mjs \
+            --lock package-lock.json \
+            --out "$OUT" \
+            --name mimir \
+            --version "$VERSION"
+          test -s "$OUT"
+          OUT="$OUT" node -e '
+            const fs = require("fs");
+            const bom = JSON.parse(fs.readFileSync(process.env.OUT, "utf8"));
+            if (bom.bomFormat !== "CycloneDX") {
+              console.error("SBOM invalid: bomFormat is not CycloneDX");
+              process.exit(1);
+            }
+            if (!Array.isArray(bom.components) || bom.components.length === 0) {
+              console.error("SBOM invalid: empty components — refusing release upload");
+              process.exit(1);
+            }
+            console.log("validated " + bom.components.length + " components");
+          '
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SBOM workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimir-${{ github.event.release.tag_name }}-sbom
+          path: ${{ steps.sbom.outputs.path }}
+          if-no-files-found: error
+
+      - name: Attach SBOM to the GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          SBOM_PATH: ${{ steps.sbom.outputs.path }}
+        run: |
+          set -euo pipefail
+          # Publish dependency metadata only. No production secrets required.
+          # --clobber replaces a prior asset on re-runs (rollback = delete asset / re-run job).
+          gh release upload "$TAG" "$SBOM_PATH" --clobber

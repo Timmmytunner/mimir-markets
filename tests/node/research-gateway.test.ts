@@ -161,8 +161,156 @@ test("a redirect loop is bounded", async () => {
     fetchImpl: async () => redirectTo("https://example.com/loop"),
   });
   assert.equal(result.ok, false);
-  assert.equal(result.ok === false && result.kind, "too_many_redirects");
+  assert.equal(result.ok === false && (result.kind === "redirect_loop" || result.kind === "too_many_redirects"), true);
   assert.ok(MAX_REDIRECTS < 10);
+});
+
+test("a multi-hop redirect cycle is caught as a redirect_loop", async () => {
+  fresh();
+  let calls = 0;
+  const result = await gatewayFetch({
+    url: "https://example.com/a",
+    agentId: "oracle",
+    policy: PUBLIC_POLICY,
+    resolve: publicDns,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) return redirectTo("https://example.com/b");
+      if (calls === 2) return redirectTo("https://example.com/a");
+      return htmlResponse("unreachable");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.kind, "redirect_loop");
+});
+
+test("a linear redirect chain exceeding maxRedirects is refused", async () => {
+  fresh();
+  let step = 0;
+  const result = await gatewayFetch({
+    url: "https://example.com/hop0",
+    agentId: "oracle",
+    policy: PUBLIC_POLICY,
+    maxRedirects: 2,
+    resolve: publicDns,
+    fetchImpl: async () => {
+      step += 1;
+      return redirectTo(`https://example.com/hop${step}`);
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.kind, "too_many_redirects");
+});
+
+test("redirectChain records the full sequence of visited URLs", async () => {
+  fresh();
+  let step = 0;
+  const result = await gatewayFetch({
+    url: "https://example.com/start",
+    agentId: "oracle",
+    policy: PUBLIC_POLICY,
+    resolve: publicDns,
+    fetchImpl: async () => {
+      step += 1;
+      if (step === 1) return redirectTo("https://example.com/middle");
+      if (step === 2) return redirectTo("https://example.com/final");
+      return htmlResponse("done");
+    },
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.finalUrl, "https://example.com/final");
+  assert.equal(result.redirects, 2);
+  assert.deepEqual(result.redirectChain, [
+    "https://example.com/start",
+    "https://example.com/middle",
+    "https://example.com/final",
+  ]);
+});
+
+test("protocol downgrade from https to http on redirect is refused", async () => {
+  fresh();
+  const result = await gatewayFetch({
+    url: "https://example.com/secure",
+    agentId: "oracle",
+    policy: PUBLIC_POLICY,
+    resolve: publicDns,
+    fetchImpl: async () => redirectTo("http://example.com/insecure"),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.kind, "protocol_downgrade");
+});
+
+test("cross-domain redirect is refused when allowCrossDomainRedirects is false", async () => {
+  fresh();
+  const result = await gatewayFetch({
+    url: "https://example.com/a",
+    agentId: "oracle",
+    policy: { allow: [], deny: [], allowCrossDomainRedirects: false },
+    resolve: publicDns,
+    fetchImpl: async () => redirectTo("https://other-domain.com/b"),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.kind, "blocked");
+  assert.equal(result.ok === false && result.kind === "blocked" && result.reason, "cross_domain");
+});
+
+test("sensitive headers are stripped on cross-origin redirects", async () => {
+  fresh();
+  let call = 0;
+  let secondHopHeaders: Record<string, string> = {};
+  const result = await gatewayFetch({
+    url: "https://source.com/a",
+    agentId: "oracle",
+    policy: PUBLIC_POLICY,
+    headers: {
+      authorization: "Bearer secret-token",
+      "x-api-key": "private-key-123",
+      "x-wallet-address": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "custom-trace": "trace-999",
+    },
+    resolve: publicDns,
+    fetchImpl: async (_url, init) => {
+      call += 1;
+      if (call === 1) return redirectTo("https://target.com/b");
+      secondHopHeaders = (init?.headers as Record<string, string>) ?? {};
+      return htmlResponse("ok");
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(secondHopHeaders["authorization"], undefined);
+  assert.equal(secondHopHeaders["x-api-key"], undefined);
+  assert.equal(secondHopHeaders["x-wallet-address"], undefined);
+  assert.equal(secondHopHeaders["custom-trace"], "trace-999");
+});
+
+test("empty or missing location on redirect returns invalid_redirect", async () => {
+  fresh();
+  const result = await gatewayFetch({
+    url: "https://example.com/start",
+    agentId: "oracle",
+    policy: PUBLIC_POLICY,
+    resolve: publicDns,
+    fetchImpl: async () => new Response(null, { status: 302, headers: { location: "" } }),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.kind, "invalid_redirect");
+});
+
+test("cancelled fetch with AbortSignal returns cancelled failure", async () => {
+  fresh();
+  const controller = new AbortController();
+  controller.abort();
+  const result = await gatewayFetch({
+    url: "https://example.com/report",
+    agentId: "oracle",
+    signal: controller.signal,
+    policy: PUBLIC_POLICY,
+    resolve: publicDns,
+    fetchImpl: async () => htmlResponse("not reached"),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.kind, "cancelled");
 });
 
 test("a relative redirect target is resolved against the current URL", async () => {

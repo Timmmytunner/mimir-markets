@@ -138,8 +138,14 @@ export default function ArenaCard({
           : "border-pv-ink/[0.14] bg-pv-ink/[0.05] text-pv-muted"
     : "";
 
+  const cardState = vs.state ?? "unknown";
+  const cardDisabled = cardState === "cancelled";
+
   return (
     <article
+      data-market-card={String(vs.id)}
+      data-market-card-state={cardState}
+      data-market-card-disabled={cardDisabled ? "true" : undefined}
       className={`card group relative flex h-full flex-col gap-6 overflow-hidden border-pv-ink/[0.12] bg-pv-surface p-6 transition-all duration-300 hover:border-pv-emerald/30 hover:bg-pv-surface2 sm:gap-8 sm:p-8 ${
         isSample
           ? "border border-dashed border-pv-emerald/35 bg-pv-surface/80 ring-1 ring-pv-emerald/[0.12]"
@@ -263,6 +269,7 @@ export default function ArenaCard({
 
           <Link
             href={`/vs/${vs.id}`}
+            data-market-card-focus
             className={
               isArchived || joined
                 ? "inline-flex shrink-0 items-center justify-center rounded-md border border-pv-ink/[0.15] bg-transparent px-5 py-2 font-display text-[10px] font-bold uppercase tracking-[0.18em] text-pv-muted shadow-none transition-[color,border-color,transform,box-shadow] duration-200 ease-out hover:-translate-y-px hover:border-pv-ink/[0.28] hover:bg-transparent hover:text-pv-text hover:shadow-[0_4px_18px_-6px_rgba(0,0,0,0.45)] active:translate-y-0 active:scale-[0.98] active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pv-ink/20 focus-visible:ring-offset-2 focus-visible:ring-offset-pv-surface"

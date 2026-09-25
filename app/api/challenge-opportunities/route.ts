@@ -1,29 +1,14 @@
 import { NextResponse } from "next/server";
 
-import type { ApiErrorShape } from "@/lib/server/api-validation";
-import { createApiError } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import { getChallengeOpportunities } from "@/lib/server/challenge-opportunities";
 
 export const dynamic = "force-dynamic";
 
-function getStatusForMessage(message: string) {
-  if (/not configured|not enabled/i.test(message)) {
-    return 503;
-  }
-
-  if (/valid source URL|not supported|did not produce|readable text|Unable to fetch source|must be an HTML or text page/i.test(message)) {
-    return 400;
-  }
-
-  return 500;
-}
-
 export async function GET(request: Request) {
   if (process.env.NEXT_PUBLIC_FEATURE_SOURCE_DRAFTS !== "1") {
-    return NextResponse.json(
-      createApiError("feature_disabled", "Challenge opportunities are not enabled"),
-      { status: 404 }
-    );
+    const err = apiError("not_found", "Challenge opportunities are not enabled");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 
   try {
@@ -36,10 +21,8 @@ export async function GET(request: Request) {
         : undefined;
 
     if (limitValue && (!Number.isFinite(limit) || Number.isNaN(limit!))) {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "limit must be a valid integer"),
-        { status: 400 }
-      );
+      const err = apiError("invalid_request", "limit must be a valid integer", { field: "limit" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const result = await getChallengeOpportunities({
@@ -58,9 +41,14 @@ export async function GET(request: Request) {
         ? error.message
         : "Unable to load challenge opportunities";
 
-    return NextResponse.json(
-      createApiError("challenge_opportunities_error", message) as ApiErrorShape,
-      { status: getStatusForMessage(message) }
-    );
+    let code: "invalid_request" | "upstream_unavailable" | "internal_error" = "internal_error";
+    if (/not configured|not enabled/i.test(message)) {
+      code = "upstream_unavailable";
+    } else if (/valid source URL|not supported|did not produce|readable text|Unable to fetch source|must be an HTML or text page/i.test(message)) {
+      code = "invalid_request";
+    }
+
+    const err = apiError(code, message);
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }

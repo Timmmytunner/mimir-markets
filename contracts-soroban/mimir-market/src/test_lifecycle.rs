@@ -435,6 +435,20 @@ fn cancelling_before_any_challenge_refunds_in_full() {
 }
 
 #[test]
+fn cancelling_twice_is_idempotent() {
+    let f = Fixture::new(1_000, 0);
+    let creator = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+
+    f.client().cancel_claim(&id);
+    f.client().cancel_claim(&id); // Should not error
+
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Cancelled);
+    assert_eq!(f.token().balance(&creator), 100 * USDC);
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+#[test]
 fn a_challenged_claim_can_no_longer_be_cancelled() {
     let f = Fixture::new(0, 0);
     let creator = f.user(100 * USDC);
@@ -442,6 +456,10 @@ fn a_challenged_claim_can_no_longer_be_cancelled() {
     let id = f.client().create_claim(&creator, &f.params(10 * USDC));
     f.client().challenge_claim(&c1, &id, &(5 * USDC), &None);
 
+    // An Active claim still fails on the state check first: ClaimNotOpen is
+    // the lifecycle error. The deeper accounting guard (ClaimHasActiveClaims)
+    // is covered by the dedicated tests below, which emulate the inconsistent
+    // state a lost update or a stale read can present.
     let err = f.client().try_cancel_claim(&id).unwrap_err().unwrap();
     assert_eq!(err, Error::ClaimNotOpen);
     assert_eq!(f.escrow_balance(), 15 * USDC);
@@ -462,15 +480,13 @@ fn only_the_creator_can_cancel() {
 }
 
 #[test]
-fn a_cancelled_claim_cannot_be_challenged_or_cancelled_again() {
+fn a_cancelled_claim_cannot_be_challenged() {
     let f = Fixture::new(0, 0);
     let creator = f.user(100 * USDC);
     let c1 = f.user(100 * USDC);
     let id = f.client().create_claim(&creator, &f.params(10 * USDC));
     f.client().cancel_claim(&id);
 
-    let err = f.client().try_cancel_claim(&id).unwrap_err().unwrap();
-    assert_eq!(err, Error::ClaimNotOpen);
     let err = f
         .client()
         .try_challenge_claim(&c1, &id, &(5 * USDC), &None)
@@ -484,6 +500,197 @@ fn cancelling_an_unknown_claim_is_rejected() {
     let f = Fixture::new(0, 0);
     let err = f.client().try_cancel_claim(&42).unwrap_err().unwrap();
     assert_eq!(err, Error::ClaimNotFound);
+}
+
+// ── Cancellation guards against active claims ──────────────────────────────
+//
+// cancel_claim is the one lifecycle transition where the creator — not the
+// oracle — moves money out of escrow. The state check alone trusts the state
+// LABEL; the tests below pin the contract-side accounting guards that keep the
+// refund from ever diverging from what the escrow actually holds.
+
+/// Regression for the active-claims guard: a claim whose accounting shows
+/// funded challengers must not be cancellable, whatever its state field says.
+/// The inconsistent claim is written directly into storage to emulate a state
+/// transition that never completed (or a stale read-index steering a worker at
+/// the wrong target), then the contract refuses the refund and changes nothing.
+#[test]
+fn a_claim_with_funded_challengers_cannot_be_cancelled_even_if_open() {
+    let f = Fixture::new(0, 0);
+    let creator = f.user(100 * USDC);
+    let c1 = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+    f.client().challenge_claim(&c1, &id, &(5 * USDC), &None);
+
+    // Rewind the lifecycle label to Open while every funded position remains:
+    // the exact inconsistency a lost update or a stale read would present.
+    let mut claim = f.client().get_claim(&id);
+    assert_eq!(claim.state, ClaimState::Active);
+    claim.state = ClaimState::Open;
+    f.env.as_contract(&f.contract_id, || {
+        crate::storage::set_claim(&f.env, id, &claim);
+    });
+
+    let inflow = f.escrow_balance();
+    assert_eq!(inflow, 15 * USDC);
+
+    let err = f.client().try_cancel_claim(&id).unwrap_err().unwrap();
+    assert_eq!(err, Error::ClaimHasActiveClaims);
+
+    // Nothing was written: the claim is untouched, the challengers' funds are
+    // still in escrow, and no refund was minted from them.
+    let after = f.client().get_claim(&id);
+    assert_eq!(after.state, ClaimState::Open);
+    assert_eq!(after.challenger_count, 1);
+    assert_eq!(after.total_challenger_stake, 5 * USDC);
+    assert_eq!(f.escrow_balance(), inflow);
+    assert_eq!(f.token().balance(&creator), 90 * USDC);
+    assert_eq!(f.token().balance(&c1), 95 * USDC);
+    assert_eq!(f.client().get_withdrawable(&creator), 0);
+
+    // The guard refused the refund; it did not brick the market. The Open
+    // claim accepts the next challenger and the market resumes normally.
+    let c2 = f.user(100 * USDC);
+    f.client().challenge_claim(&c2, &id, &(2 * USDC), &None);
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Active);
+    assert_eq!(f.client().get_claim(&id).challenger_count, 2);
+}
+
+/// Boundary: the guard keys on the claim's OWN accounting, so a single atomic
+/// unit of counterparty exposure — the smallest residue a fixed-odds challenge
+/// can reserve — blocks the refund, while exactly zero allows it.
+#[test]
+fn a_single_atomic_unit_of_exposure_blocks_cancellation() {
+    let f = Fixture::new(0, 0);
+    let creator = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+
+    // One stroop of reserved creator liability, no challengers: the least
+    // inconsistent claim that is still not refundable.
+    let mut claim = f.client().get_claim(&id);
+    claim.reserved_creator_liability = 1;
+    f.env.as_contract(&f.contract_id, || {
+        crate::storage::set_claim(&f.env, id, &claim);
+    });
+
+    let err = f.client().try_cancel_claim(&id).unwrap_err().unwrap();
+    assert_eq!(err, Error::ClaimHasActiveClaims);
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Open);
+    assert_eq!(f.escrow_balance(), 10 * USDC);
+
+    // Exactly zero exposure cancels normally: the normal path is unchanged.
+    let mut claim = f.client().get_claim(&id);
+    claim.reserved_creator_liability = 0;
+    f.env.as_contract(&f.contract_id, || {
+        crate::storage::set_claim(&f.env, id, &claim);
+    });
+    f.client().cancel_claim(&id);
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Cancelled);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.token().balance(&creator), 100 * USDC);
+}
+
+/// Conservation across the shared escrow: cancelling one claim pays out
+/// exactly that claim's stake and touches nothing else — not the other open
+/// claim's funds, not accrued fees, not the fee policy.
+#[test]
+fn cancellation_conserves_the_shared_escrow() {
+    let f = Fixture::new(150, 50);
+    let creator_a = f.user(100 * USDC);
+    let creator_b = f.user(100 * USDC);
+    let a = f.client().create_claim(&creator_a, &f.params(10 * USDC));
+    let b = f.client().create_claim(&creator_b, &f.params(7 * USDC));
+    assert_eq!(f.escrow_balance(), 17 * USDC);
+
+    f.client().cancel_claim(&a);
+
+    assert_eq!(f.client().get_claim(&a).state, ClaimState::Cancelled);
+    assert_eq!(f.client().get_claim(&b).state, ClaimState::Open);
+    // Only claim A's stake left the shared escrow; B's funds are untouched.
+    assert_eq!(f.escrow_balance(), 7 * USDC);
+    assert_eq!(f.token().balance(&creator_a), 100 * USDC);
+    assert_eq!(f.token().balance(&creator_b), 93 * USDC);
+    // A refund is not profit: no fee leg exists on either policy level.
+    assert_eq!(f.client().get_accrued_fees(&f.platform), 0);
+    assert_eq!(f.client().get_platform_stats().balance, 7 * USDC);
+
+    // Claim B still lives its full lifecycle afterwards.
+    let c1 = f.user(100 * USDC);
+    f.client().challenge_claim(&c1, &b, &(3 * USDC), &None);
+    f.advance_by(3_600);
+    f.client().resolve_claim(&b, &WinnerSide::Challengers, &f.str("won"), &85, &f.zero_hash());
+    // Pool mode: the challenger takes their stake plus the creator's, less the
+    // fee on profit only. Profit 7 USDC at the platform's 150 bps (the
+    // agent-owner leg has no recipient on this claim) = 1_050_000 atomic.
+    assert_eq!(f.client().claim_challenger_payout(&c1, &b), 98_950_000);
+    // The escrow keeps the fee and nothing else; claim A's refund never
+    // contributed.
+    assert_eq!(f.escrow_balance(), 1_050_000);
+}
+
+/// A refund the creator's wallet cannot accept is parked as a withdrawable
+/// balance: the cancellation still finalises, funds stay in escrow until
+/// pulled, and nothing is minted.
+#[test]
+fn a_cancellation_refund_is_parked_when_the_creator_cannot_receive() {
+    let f = Fixture::with_stub_token(0, 0);
+    let creator = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+    f.stub().set_blocked(&creator, &true);
+
+    f.client().cancel_claim(&id);
+
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Cancelled);
+    assert_eq!(f.client().get_withdrawable(&creator), 10 * USDC);
+    assert_eq!(f.escrow_balance(), 10 * USDC);
+
+    // Once the wallet can receive again, the creator pulls their own refund.
+    f.stub().set_blocked(&creator, &false);
+    assert_eq!(f.client().withdraw(&creator), 10 * USDC);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.token().balance(&creator), 100 * USDC);
+}
+
+/// Ordering race: whichever transaction the ledger sequences second is refused,
+/// because the contract re-derives the claim's state at execution time and
+/// never trusts a caller's view of it. A creator cancel prepared against a
+/// stale Open read cannot fire after a challenge has activated the market, and
+/// a challenge cannot land after a cancellation finalised.
+#[test]
+fn a_cancel_that_executes_after_a_challenge_is_refused() {
+    let f = Fixture::new(0, 0);
+    let creator = f.user(100 * USDC);
+    let c1 = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+
+    // The challenge wins the ordering race and activates the market.
+    f.client().challenge_claim(&c1, &id, &(5 * USDC), &None);
+
+    // The creator's cancel — authorized and everything — now executes against
+    // Active state and is refused: nothing moves, nothing is rewritten.
+    let err = f.client().try_cancel_claim(&id).unwrap_err().unwrap();
+    assert_eq!(err, Error::ClaimNotOpen);
+    assert_eq!(f.escrow_balance(), 15 * USDC);
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Active);
+
+    // The mirror case: a cancelled claim refuses a later challenge too.
+    let id2 = f.client().create_claim(&creator, &f.params(4 * USDC));
+    f.client().cancel_claim(&id2);
+    let err = f
+        .client()
+        .try_challenge_claim(&c1, &id2, &(4 * USDC), &None)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::ClaimNotOpen);
+    assert_eq!(f.escrow_balance(), 15 * USDC);
+}
+
+/// The new error codes are part of the interface: pin them so downstream
+/// clients and read-index reason about stable numbers.
+#[test]
+fn cancellation_error_codes_are_stable() {
+    assert_eq!(Error::ClaimHasActiveClaims as u32, 38);
+    assert_eq!(Error::RefundNotEscrowed as u32, 39);
 }
 
 // ── Views ────────────────────────────────────────────────────────────────────
@@ -770,4 +977,39 @@ fn a_full_roster_is_fully_refunded_on_an_unresolvable_verdict() {
     assert_eq!(f.client().get_accrued_fees(&f.platform), 0);
     assert_eq!(f.client().get_claim(&id).remaining_escrow, 0);
     assert_eq!(f.escrow_balance(), 0);
+}
+
+
+#[test]
+fn transition_deadline_cancels_underfunded_open_claim() {
+    let f = Fixture::new(0, 0);
+    let creator = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+
+    // Too early
+    let err = f.client().try_transition_deadline(&id).unwrap_err().unwrap();
+    assert_eq!(err, Error::Timelocked);
+
+    // Pass deadline
+    f.advance_to(f.client().get_claim(&id).deadline + 1);
+
+    f.client().transition_deadline(&id);
+    let claim = f.client().get_claim(&id);
+    assert_eq!(claim.state, ClaimState::Cancelled);
+    assert_eq!(f.token().balance(&creator), 100 * USDC);
+}
+
+#[test]
+fn transition_deadline_preserves_active_state_to_extend_ttl() {
+    let f = Fixture::new(0, 0);
+    let creator = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+    let challenger = f.user(100 * USDC);
+    
+    f.client().challenge_claim(&challenger, &id, &(10 * USDC), &None);
+    f.advance_to(f.client().get_claim(&id).deadline + 1);
+
+    // Should succeed now to persist TTL bumps instead of failing
+    f.client().transition_deadline(&id);
+    assert_eq!(f.client().get_claim(&id).state, ClaimState::Active);
 }

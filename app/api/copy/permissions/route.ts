@@ -17,6 +17,13 @@ function policyMessage(permission: Omit<CopyPermission, "signedPolicyHash">): st
 }
 
 export async function POST(req: Request): Promise<Response> {
+  const { authorizeRequest } = await import("@/lib/api/policy");
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+  const gate = authorizeRequest("public_read", { route: "/api/copy/permissions", ip });
+  if (!gate.allowed && gate.error) {
+    return Response.json(gate.error.body, { status: gate.error.status, headers: gate.error.headers });
+  }
+
   type JsonPermission = Omit<CopyPermission, "signedPolicyHash" | "spendPermission"> & {
     spendPermission: Omit<CopyPermission["spendPermission"], "allowanceAtomic"> & { allowanceAtomic: string | bigint };
   };
@@ -44,6 +51,12 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 export async function DELETE(req: Request): Promise<Response> {
+  const { authorizeRequest } = await import("@/lib/api/policy");
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+  const gate = authorizeRequest("public_read", { route: "/api/copy/permissions", ip });
+  if (!gate.allowed && gate.error) {
+    return Response.json(gate.error.body, { status: gate.error.status, headers: gate.error.headers });
+  }
   let body: { permissionId?: string; signature?: string };
   try { body = await req.json(); } catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }
   const permissionId = body.permissionId?.trim();
@@ -60,6 +73,12 @@ export async function DELETE(req: Request): Promise<Response> {
 }
 
 export async function GET(req: Request): Promise<Response> {
+  const { authorizeRequest } = await import("@/lib/api/policy");
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+  const gate = authorizeRequest("public_read", { route: "/api/copy/permissions", ip });
+  if (!gate.allowed && gate.error) {
+    return Response.json(gate.error.body, { status: gate.error.status, headers: gate.error.headers });
+  }
   const permissionId = new URL(req.url).searchParams.get("permissionId")?.trim();
   if (!permissionId) return Response.json({ error: "permissionId required" }, { status: 400 });
   const executions = await listCopyExecutions(permissionId, 100);

@@ -1,17 +1,15 @@
-import { consumeAgentNonce, getAgentApiResponse, getAgentRecord, insertAgentRequestAudit, saveAgentApiResponse, upsertAgentRecord } from "@/lib/db";
+import { consumeNonce as consumeNonceFromStore } from "@/lib/server/nonce-store";
+import { getAgentApiResponse, getAgentRecord, insertAgentRequestAudit, saveAgentApiResponse, upsertAgentRecord } from "@/lib/db";
 import type { AgentRecord } from "./registry";
 
 declare global {
   // eslint-disable-next-line no-var
   var __mimirAgentRecords: Map<string, AgentRecord> | undefined;
   // eslint-disable-next-line no-var
-  var __mimirAgentNonces: Set<string> | undefined;
-  // eslint-disable-next-line no-var
   var __mimirAgentResponses: Map<string, { body: unknown; status: number }> | undefined;
 }
 
 const records = globalThis.__mimirAgentRecords ??= new Map<string, AgentRecord>();
-const nonces = globalThis.__mimirAgentNonces ??= new Set<string>();
 const responses = globalThis.__mimirAgentResponses ??= new Map();
 const responseKey = (agentId: string, action: string, key: string) => `${agentId}:${action}:${key}`;
 
@@ -30,16 +28,20 @@ export async function loadAgent(agentId: string): Promise<AgentRecord | null> {
   }
 }
 
+/**
+ * Consume a nonce for replay protection.
+ *
+ * Delegates to `lib/server/nonce-store` which provides:
+ *  - Durable `agent_api_nonces` rows with a per-row `expires_at` so old nonces
+ *    are prunable and the table does not grow forever.
+ *  - A bounded in-process cache (LRU, capped at NONCE_CACHE_MAX) that
+ *    short-circuits DB round-trips for same-instance replays.
+ *
+ * The `at` parameter (ms) is the request timestamp used as `consumed_at` in the
+ * DB row. Retaining it here keeps the call-site signature stable.
+ */
 export async function consumeNonce(agentId: string, nonce: string, at: number): Promise<boolean> {
-  if (nonces.has(nonce)) return false;
-  try {
-    const consumed = await consumeAgentNonce(agentId, nonce, at);
-    if (!consumed) return false;
-  } catch {
-    // Local development without Neon still gets process-lifetime replay defense.
-  }
-  nonces.add(nonce);
-  return true;
+  return consumeNonceFromStore(agentId, nonce, at);
 }
 
 export async function auditAgentRequest(row: Parameters<typeof insertAgentRequestAudit>[0]): Promise<void> {

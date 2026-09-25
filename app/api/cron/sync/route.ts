@@ -2,7 +2,7 @@ import { authorizeRequest } from "@/lib/api/policy";
 import { NextResponse } from "next/server";
 
 import { beat } from "@/lib/ops/heartbeat";
-import { createApiError } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import { reconcileVsIndex } from "@/lib/server/vs-index";
 
 export const dynamic = "force-dynamic";
@@ -70,9 +70,7 @@ export async function GET(request: Request) {
   } catch (error) {
     // Alive and failing, which staleness alone would report as healthy.
     await beat("sync", { error, intervalSec: SYNC_INTERVAL_SEC });
-    return NextResponse.json(
-      createApiError("internal_error", "Unable to reconcile VS index"),
-      { status: 500 }
-    );
+    const err = apiError("internal_error", "Unable to reconcile VS index");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }

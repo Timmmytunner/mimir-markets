@@ -1,7 +1,7 @@
 import { authorizeRequest } from "@/lib/api/policy";
 import { NextResponse } from "next/server";
 
-import { createApiError } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import { refreshChallengeOpportunitiesIndex } from "@/lib/server/challenge-opportunities";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +38,8 @@ export async function GET(request: Request) {
     }
 
     if (process.env.NEXT_PUBLIC_FEATURE_SOURCE_DRAFTS !== "1") {
-      return NextResponse.json(
-        createApiError("feature_disabled", "Challenge opportunities are not enabled"),
-        { status: 404 }
-      );
+      const err = apiError("not_found", "Challenge opportunities are not enabled");
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const summary = await refreshChallengeOpportunitiesIndex();
@@ -64,9 +62,9 @@ export async function GET(request: Request) {
         ? error.message
         : "Unable to refresh challenge opportunities";
 
-    return NextResponse.json(
-      createApiError("internal_error", message),
-      { status: /not configured/i.test(message) ? 503 : 500 }
-    );
+    const code = /not configured/i.test(message) ? "upstream_unavailable" : "internal_error";
+    const err = apiError(code, message);
+
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }

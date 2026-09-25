@@ -36,12 +36,15 @@ import { useExploreFilterState } from "@/hooks/useExploreFilterState";
 import PageTransition, { AnimatedItem } from "@/components/PageTransition";
 import { ArenaCardSkeleton } from "@/components/ui";
 import ArenaCard from "@/components/ArenaCard";
+import MarketCardGrid from "@/components/MarketCardGrid";
 import EmptyState from "@/components/EmptyState";
 import ExploreArenaEmptyState from "@/components/explorer/ExploreArenaEmptyState";
 import ExploreFilteredEmptyState from "@/components/explorer/ExploreFilteredEmptyState";
 import { ChevronDown, ListFilter, RefreshCw, Search, X } from "lucide-react";
 import ChallengeOpportunityCard from "@/components/explorer/ChallengeOpportunityCard";
 import { BlueprintHeading } from "@/components/BlueprintGrid";
+import CacheFreshnessPill from "@/components/CacheFreshnessPill";
+import StaleIndexWarning from "@/components/StaleIndexWarning";
 import type { VSCacheFreshness } from "@/lib/vs-freshness";
 
 const SECONDS_PER_DAY = 86_400;
@@ -541,7 +544,10 @@ export default function ExploreClient() {
     }
 
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <MarketCardGrid
+        aria-label="Settled market cards"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
         {filteredClosedChallenges.map((vs) => (
           <motion.div
             key={vs.id}
@@ -559,7 +565,7 @@ export default function ExploreClient() {
             />
           </motion.div>
         ))}
-      </div>
+      </MarketCardGrid>
     );
   };
 
@@ -599,7 +605,10 @@ export default function ExploreClient() {
     }
 
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <MarketCardGrid
+        aria-label="Open market cards"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
         {filteredOpenChallenges.map((vs) => (
           <motion.div
             key={vs.id}
@@ -617,7 +626,7 @@ export default function ExploreClient() {
             />
           </motion.div>
         ))}
-      </div>
+      </MarketCardGrid>
     );
   };
 
@@ -684,7 +693,20 @@ export default function ExploreClient() {
     <PageTransition>
       <div className="mb-8">
         <BlueprintHeading>{t("title")}</BlueprintHeading>
+        {activeView !== "ai" ? (
+          <div className="mt-3">
+            <CacheFreshnessPill freshness={vsFreshness} />
+          </div>
+        ) : null}
       </div>
+
+      {activeView !== "ai" ? (
+        <StaleIndexWarning
+          freshness={vsFreshness}
+          refreshing={refreshing}
+          onRefresh={() => void loadExploreData({ forceRefresh: true })}
+        />
+      ) : null}
 
       {/* z-20: filter dropdowns (absolute z-40) must stack above #arena-content — Framer
           motion siblings create stacking contexts; later DOM order was painting cards on top. */}

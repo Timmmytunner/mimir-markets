@@ -35,6 +35,7 @@ export function PerformanceChart({
   label,
   valueSuffix = " USDC",
   emptyMessage = "No settled results in this window yet.",
+  invalidMessage = "Performance data is unavailable.",
   height = 180,
 }: {
   points: ChartPoint[];
@@ -43,12 +44,16 @@ export function PerformanceChart({
   label: string;
   valueSuffix?: string;
   emptyMessage?: string;
+  invalidMessage?: string;
   height?: number;
 }) {
   const gradientId = useId();
   const [drawn, setDrawn] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const pathRef = useRef<SVGPathElement>(null);
+  const invalid = !Number.isFinite(baseline) || points.some((point) =>
+    !Number.isFinite(point.timestamp) || point.timestamp <= 0 || !Number.isFinite(point.value)
+  );
 
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -59,7 +64,7 @@ export function PerformanceChart({
   }, [points.length]);
 
   const geometry = useMemo(() => {
-    if (points.length === 0) return null;
+    if (invalid || points.length === 0) return null;
     const values = points.map((point) => point.value);
     const min = Math.min(baseline, ...values);
     const max = Math.max(baseline, ...values);
@@ -79,7 +84,18 @@ export function PerformanceChart({
     const area = `${line} L${(points.length === 1 ? VIEW_WIDTH - PAD_X : coords.at(-1)!.x).toFixed(1)},${VIEW_HEIGHT - PAD_Y} L${PAD_X},${VIEW_HEIGHT - PAD_Y} Z`;
 
     return { coords, line, area, baselineY: y(baseline) };
-  }, [points, baseline]);
+  }, [points, baseline, invalid]);
+
+  if (invalid) {
+    return (
+      <div
+        role="alert"
+        className="border border-pv-danger/30 bg-pv-danger/[0.06] px-4 py-12 text-center text-sm text-pv-muted"
+      >
+        {invalidMessage}
+      </div>
+    );
+  }
 
   if (!geometry) {
     return (
@@ -144,7 +160,7 @@ export function PerformanceChart({
             to find a 4px dot. */}
         {points.map((point, index) => (
           <rect
-            key={point.timestamp}
+            key={`${point.timestamp}-${index}`}
             x={index === 0 ? 0 : (geometry.coords[index - 1].x + geometry.coords[index].x) / 2}
             y={0}
             width={

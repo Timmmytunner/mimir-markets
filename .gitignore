@@ -45,6 +45,10 @@ coverage/
 __pycache__/
 *.pyc
 
+# Browser smoke suite artifacts (playwright.config.ts writes these)
+test-results/
+playwright-report/
+
 # ========================
 # Logs
 # ========================
@@ -101,3 +105,6 @@ artifacts/
 graphify-out/
 artifacts/
 mimir-logo-preview.png
+
+# Generated release SBOM (published via Actions, not committed)
+sbom/

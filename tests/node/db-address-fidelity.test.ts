@@ -226,6 +226,17 @@ test("getAgentTradeRows queries the address verbatim and does not fold in SQL", 
   }
 });
 
+test("getAgentTradeRows prefers the chain-derived settlement timestamp", async () => {
+  const db = await import("../../lib/db");
+  reset();
+  await db.getAgentTradeRows(ACCOUNT_A);
+  assert.equal(recorded.length, 2);
+  for (const query of recorded) {
+    assert.match(query.sql, /market_settlements/);
+    assert.match(query.sql, /COALESCE\(ms\.settled_at \* 1000, c\.updated_at\) AS settled_at/);
+  }
+});
+
 test("basket creator and subscriber addresses are stored verbatim", async () => {
   const db = await import("../../lib/db");
 

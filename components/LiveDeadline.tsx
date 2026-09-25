@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getTimeRemaining } from "@/lib/constants";
+import { formatDeadline, getTimeRemaining } from "@/lib/constants";
 import { useLocale } from "next-intl";
 
 interface LiveDeadlineProps {
@@ -17,6 +17,8 @@ interface LiveDeadlineProps {
   compact?: boolean;
   /** Override countdown text sizing/styling */
   timeClassName?: string;
+  /** Hide the absolute local-timezone timestamp under the countdown */
+  hideAbsolute?: boolean;
   className?: string;
 }
 
@@ -31,6 +33,7 @@ const PHASE_CONFIG = {
  * LiveDeadline — living countdown with visual decay bar.
  *
  * - Decaying progress bar (not just text)
+ * - Absolute deadline in the user's local timezone
  * - Ticking seconds visible when < 1hr
  * - Color shifts: neutral → amber → red pulse
  * - Phase badges that animate transitions
@@ -42,11 +45,19 @@ export default function LiveDeadline({
   showPhaseBadge = true,
   compact = false,
   timeClassName = "",
+  hideAbsolute = false,
   className = "",
 }: LiveDeadlineProps) {
   const locale = useLocale();
   const countdownLocale = locale === "en" ? "en" : "es";
   const [state, setState] = useState(() => getTimeRemaining(deadline, countdownLocale));
+  // Resolve timezone only after mount so SSR markup stays stable and the
+  // absolute label always reflects the viewer's zone (not the server's).
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const id = setInterval(
@@ -55,6 +66,11 @@ export default function LiveDeadline({
     );
     return () => clearInterval(id);
   }, [deadline, countdownLocale]);
+
+  const absoluteLocal = useMemo(() => {
+    if (!mounted || hideAbsolute) return "";
+    return formatDeadline(deadline, countdownLocale);
+  }, [mounted, hideAbsolute, deadline, countdownLocale]);
 
   // Calculate progress (0→1 where 1 = full time, 0 = expired)
   // Assume max range of 30 days for visual scaling
@@ -119,6 +135,18 @@ export default function LiveDeadline({
           {state.text}
         </span>
       </div>
+
+      {absoluteLocal ? (
+        <time
+          dateTime={new Date(deadline * 1000).toISOString()}
+          className={`font-mono tabular-nums text-pv-muted ${
+            compact ? "text-[9px] leading-tight" : "text-[10px] leading-snug"
+          }`}
+          title={absoluteLocal}
+        >
+          {absoluteLocal}
+        </time>
+      ) : null}
 
       {/* Decay bar */}
       {showBar && !compact && (

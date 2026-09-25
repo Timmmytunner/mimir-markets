@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { createApiError } from "@/lib/server/api-validation";
 import {
   moderateClaim,
   type ClaimModerationInput,

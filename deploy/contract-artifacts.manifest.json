@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "hashAlgorithm": "sha256",
+  "description": "Soroban contract artifact provenance pins. Leave sha256 null during develop; pin with `npm run verify:artifacts -- --write-pins` before a funded release. Release mode (`--mode=release` or MIMIR_REQUIRE_ARTIFACT_PROVENANCE=1) fails closed on unpinned or mismatched digests.",
+  "artifacts": [
+    {
+      "id": "mimir-market",
+      "crate": "mimir-market",
+      "sourceDir": "contracts-soroban/mimir-market",
+      "wasmPath": "contracts-soroban/target/wasm32v1-none/release/mimir_market.wasm",
+      "buildTarget": "wasm32v1-none",
+      "profile": "release",
+      "sha256": null
+    },
+    {
+      "id": "mimir-squad",
+      "crate": "mimir-squad",
+      "sourceDir": "contracts-soroban/mimir-squad",
+      "wasmPath": "contracts-soroban/target/wasm32v1-none/release/mimir_squad.wasm",
+      "buildTarget": "wasm32v1-none",
+      "profile": "release",
+      "sha256": null
+    }
+  ]
+}

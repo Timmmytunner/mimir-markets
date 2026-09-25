@@ -5,7 +5,7 @@
 
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
-use crate::types::{Challenger, Claim, Error, FeePolicy, PendingFeePolicy};
+use crate::types::{Challenger, Claim, Error, FeePolicy, PendingFeePolicy, Verdict};
 
 #[contracttype]
 #[derive(Clone)]
@@ -23,6 +23,10 @@ pub enum DataKey {
     FeesClaimed,
     Claim(u64),
     Challengers(u64),
+    /// Versioned verdict written at resolution. Absent on claims resolved
+    /// before verdicts were versioned; readers fall back to `Claim.winner_side`
+    /// for those.
+    Verdict(u64),
     /// Pull-payment fallback for failed payout pushes.
     Withdrawable(Address),
     /// Accrued, unclaimed fees. Always pulled, never pushed.
@@ -183,9 +187,76 @@ pub fn challengers(env: &Env, id: u64) -> Vec<Challenger> {
     }
 }
 
+/// Return a page of the challenger roster starting at `offset`, up to `limit`
+/// entries. `limit = 0` is treated as "return all remaining entries from
+/// `offset`". Callers should use a non-zero limit in production to bound
+/// ledger-entry footprint.
+///
+/// Never panics: if `offset` is beyond the end of the roster the returned
+/// `items` slice is empty and `total` carries the actual roster length.
+pub fn challengers_page(
+    env: &Env,
+    id: u64,
+    offset: u32,
+    limit: u32,
+) -> crate::types::ChallengerPage {
+    let list = challengers(env, id);
+    let total = list.len();
+
+    // Clamp offset to [0, total] so arithmetic below is always valid.
+    let start = offset.min(total);
+
+    // How many items remain from `start` to the end of the roster.
+    let remaining = total - start;
+
+    // Effective limit: 0 means "everything remaining".
+    let take = if limit == 0 {
+        remaining
+    } else {
+        limit.min(remaining)
+    };
+
+    let mut items = Vec::new(env);
+    for i in start..start + take {
+        items.push_back(list.get(i).unwrap());
+    }
+
+    crate::types::ChallengerPage {
+        items,
+        offset: start,
+        total,
+    }
+}
+
 pub fn set_challengers(env: &Env, id: u64, list: &Vec<Challenger>) {
     let key = DataKey::Challengers(id);
     env.storage().persistent().set(&key, list);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_EXTEND);
+}
+
+// ── Versioned verdicts ───────────────────────────────────────────────────────
+
+/// The versioned verdict stored for a resolved claim, if one was written.
+///
+/// `None` is the pre-versioning case: the claim was resolved by a contract
+/// build that stored only `Claim.winner_side`. Callers must fall back to that
+/// field rather than treating the claim as unresolved.
+pub fn verdict(env: &Env, id: u64) -> Option<Verdict> {
+    let key = DataKey::Verdict(id);
+    let stored: Option<Verdict> = env.storage().persistent().get(&key);
+    if stored.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, BUMP_THRESHOLD, BUMP_EXTEND);
+    }
+    stored
+}
+
+pub fn set_verdict(env: &Env, id: u64, verdict: &Verdict) {
+    let key = DataKey::Verdict(id);
+    env.storage().persistent().set(&key, verdict);
     env.storage()
         .persistent()
         .extend_ttl(&key, BUMP_THRESHOLD, BUMP_EXTEND);

@@ -24,6 +24,24 @@ pub struct ClaimChallenged {
     pub stake: i128,
 }
 
+/// A fixed-odds challenge consumed part of the creator's liquidity guarantee.
+/// `reserved_creator_liability` and `available_creator_liquidity` are snapshots
+/// after this challenge, so an indexer can audit the limit without replaying
+/// the roster or trusting a stale read-index calculation.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FixedOddsLiquidityReserved {
+    #[topic]
+    pub id: u64,
+    #[topic]
+    pub challenger: Address,
+    pub stake: i128,
+    pub gross: i128,
+    pub profit: i128,
+    pub reserved_creator_liability: i128,
+    pub available_creator_liquidity: i128,
+}
+
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClaimResolved {
@@ -35,11 +53,47 @@ pub struct ClaimResolved {
     pub evidence_hash: BytesN<32>,
 }
 
+/// The versioned verdict written at resolution, emitted alongside
+/// `ClaimResolved`.
+///
+/// `ClaimResolved` keeps its existing shape for compatible indexers; this event
+/// carries the explicit encoding version so consumers can pin the verdict
+/// encoding without a second read or a schema guess.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerdictEncoded {
+    #[topic]
+    pub id: u64,
+    pub version: u32,
+    pub winner_side: WinnerSide,
+}
+
+/// The creator's refund of an unchallenged claim. `refund` lets an indexer
+/// reconcile the refund against `creator_stake` and escrow without a second
+/// read; `parked` distinguishes a delivered refund from one parked as a
+/// withdrawable balance when the creator's trustline refused the transfer.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClaimCancelled {
     #[topic]
     pub id: u64,
+    pub refund: i128,
+    pub parked: bool,
+}
+
+/// Defensive halt: the claim's accounting shows counterparty funds or a
+/// reserved creator liability while its lifecycle state claims to be `Open`.
+/// The cancellation was refused and NOTHING changed — this event is the
+/// on-chain record for keepers, indexers and incident response.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CancellationRefused {
+    #[topic]
+    pub id: u64,
+    pub challenger_count: u32,
+    pub total_challenger_stake: i128,
+    pub reserved_creator_liability: i128,
+    pub reason: u32,
 }
 
 #[contractevent]
@@ -104,6 +158,20 @@ pub struct AgentAttributed {
     pub id: u64,
     #[topic]
     pub agent_owner_recipient: Address,
+}
+
+/// Frozen fee terms written onto a claim at creation. Indexers can treat this as
+/// the authoritative economics for the market; a later `FeePolicyUpdated` must
+/// not rewrite them.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeePolicySnapshotted {
+    #[topic]
+    pub id: u64,
+    pub platform_fee_bps: u32,
+    pub agent_owner_fee_bps: u32,
+    pub platform_recipient: Option<Address>,
+    pub agent_owner_recipient: Option<Address>,
 }
 
 #[contractevent]

@@ -223,6 +223,68 @@ fn a_new_claim_picks_up_the_new_policy() {
     assert_eq!(snapshot.agent_owner_recipient, None);
 }
 
+#[test]
+fn a_queued_but_unexecuted_policy_is_not_snapshotted() {
+    let f = Fixture::new(100, 0);
+    // Queue a higher policy; do not execute. Creation must freeze the LIVE policy.
+    f.client()
+        .queue_fee_policy(&900, &100, &Some(f.platform.clone()));
+    assert!(f.client().get_pending_fee_policy().is_some());
+
+    let creator = f.user(100 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+    let snapshot = f.client().get_claim_fees(&id);
+    assert_eq!(snapshot.platform_fee_bps, 100);
+    assert_eq!(snapshot.agent_owner_fee_bps, 0);
+    assert_eq!(snapshot.platform_recipient, Some(f.platform.clone()));
+}
+
+#[test]
+fn changing_the_platform_recipient_cannot_redirect_an_existing_claim() {
+    let f = Fixture::new(1_000, 0);
+    let creator = f.user(100 * USDC);
+    let c1 = f.user(100 * USDC);
+    // The fee timelock is two days, so the claim's deadline has to outlive the
+    // queue/execute cycle below: the challenge afterwards must still land
+    // inside the claim's challenge window.
+    let mut params = f.params(10 * USDC);
+    params.deadline = f.env.ledger().timestamp() + FEE_TIMELOCK_SECONDS + 3_600;
+    let id = f.client().create_claim(&creator, &params);
+    assert_eq!(
+        f.client().get_claim_fees(&id).platform_recipient,
+        Some(f.platform.clone())
+    );
+
+    let new_platform = Address::generate(&f.env);
+    f.client()
+        .queue_fee_policy(&1_000, &0, &Some(new_platform.clone()));
+    f.advance_by(FEE_TIMELOCK_SECONDS);
+    f.client().execute_fee_policy();
+    assert_eq!(
+        f.client().get_fee_policy().platform_recipient,
+        Some(new_platform.clone())
+    );
+    // Frozen recipient on the claim is unchanged.
+    assert_eq!(
+        f.client().get_claim_fees(&id).platform_recipient,
+        Some(f.platform.clone())
+    );
+
+    f.client().challenge_claim(&c1, &id, &(10 * USDC), &None);
+    f.advance_by(3_600);
+    f.client().resolve_claim(
+        &id,
+        &WinnerSide::Creator,
+        &f.str("creator"),
+        &90,
+        &f.zero_hash(),
+    );
+
+    // Fees accrued to the snapshotted recipient, not the new live one.
+    assert_eq!(f.client().get_accrued_fees(&f.platform), USDC);
+    assert_eq!(f.client().get_accrued_fees(&new_platform), 0);
+}
+
 // ── Agent attribution ────────────────────────────────────────────────────────
 
 #[test]
@@ -317,16 +379,14 @@ fn fees_are_pulled_not_pushed_and_only_once() {
     assert_eq!(stats.fees_accrued, expected);
     assert_eq!(stats.fees_claimed, expected);
 
-    let err = f.client().try_claim_fees(&f.platform).unwrap_err().unwrap();
-    assert_eq!(err, Error::NoFees);
+    assert_eq!(f.client().claim_fees(&f.platform), 0);
 }
 
 #[test]
 fn an_unrelated_address_has_no_fees_to_claim() {
     let f = Fixture::new(1_000, 0);
     let stranger = Address::generate(&f.env);
-    let err = f.client().try_claim_fees(&stranger).unwrap_err().unwrap();
-    assert_eq!(err, Error::NoFees);
+    assert_eq!(f.client().claim_fees(&stranger), 0);
 }
 
 // ── Ownership / oracle ───────────────────────────────────────────────────────

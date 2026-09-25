@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, ExternalLink, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronUp, ShieldCheck } from "lucide-react";
+import ResearchSourceCitations from "@/components/research/ResearchSourceCitations";
 import type { VSData } from "@/lib/contract";
 import {
   STELLAR_EXPLORER_URL,
@@ -101,21 +102,19 @@ export function EvidenceInspector({ vs }: EvidenceInspectorProps) {
             </div>
           )}
 
-          {/* Evidence source */}
-          <div>
-            <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.16em] text-pv-muted">
-              Evidence Source
-            </div>
-            <a
-              href={vs.resolution_url}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 text-[13px] text-pv-cyan hover:text-pv-text transition-colors truncate"
-            >
-              <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
-              <span className="truncate">{vs.resolution_url}</span>
-            </a>
-          </div>
+          {/* Research-source citations (primary locked URL + hash) */}
+          <ResearchSourceCitations
+            sources={[
+              {
+                url: vs.resolution_url,
+                trustTier: "primary",
+                contentHash: evidenceHash,
+                excerpt: vs.resolution_summary,
+              },
+            ]}
+            deadlineUnix={typeof vs.deadline === "number" ? vs.deadline : null}
+            cancelled={vs.state === "cancelled"}
+          />
 
           {/* Evidence hash */}
           {hasEvidence && (

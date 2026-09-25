@@ -480,6 +480,58 @@ export function grantCapability(
   };
 }
 
+// ── Idempotent registration ───────────────────────────────────────────────────
+
+/**
+ * Wallets that define whether a re-submitted register is the same admission or a
+ * hostile takeover of the agentId.
+ *
+ * Capabilities and limits are deliberately excluded: those are owner grants that
+ * change after registration, and treating them as identity would turn every
+ * legitimate retry (or a client that re-sends a stale body) into a 409.
+ */
+export interface RegistrationIdentity {
+  ownerWallet: string;
+  operatorWallet: string;
+  payoutWallet: string;
+}
+
+export type RegistrationConflictReason =
+  | "owner_mismatch"
+  | "operator_mismatch"
+  | "payout_mismatch"
+  | "revoked";
+
+export type RegistrationReplayVerdict =
+  | { ok: true }
+  | { ok: false; reason: RegistrationConflictReason };
+
+/**
+ * Decide whether an already-stored agent may be returned for a duplicate register.
+ *
+ * Same owner + operator + payout → idempotent success (safe client retries).
+ * Any other claimant for the agentId → conflict. Revoked agents stay terminal:
+ * re-admission is a fresh registration under a new agentId, never a silent revive.
+ */
+export function evaluateRegistrationReplay(
+  existing: AgentRecord,
+  proposed: RegistrationIdentity,
+): RegistrationReplayVerdict {
+  if (existing.status === "revoked") {
+    return { ok: false, reason: "revoked" };
+  }
+  if (!sameWallet(existing.ownerWallet, proposed.ownerWallet)) {
+    return { ok: false, reason: "owner_mismatch" };
+  }
+  if (!sameWallet(existing.operatorWallet, proposed.operatorWallet)) {
+    return { ok: false, reason: "operator_mismatch" };
+  }
+  if (!sameWallet(existing.payoutWallet, proposed.payoutWallet)) {
+    return { ok: false, reason: "payout_mismatch" };
+  }
+  return { ok: true };
+}
+
 /**
  * Metadata hash so an off-chain document cannot be swapped silently.
  *

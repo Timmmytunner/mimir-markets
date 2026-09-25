@@ -1,60 +1,31 @@
 import { getRequestConfig } from "next-intl/server";
 import { routing } from "./routing";
 
-/** Fills missing `explore` keys so older or partial message files do not throw at runtime. */
-const EXPLORE_FALLBACKS: Record<string, Record<string, string>> = {
-  en: {
-    noResults: "No challenges match these filters",
-    noResultsDesc:
-      "Reset filters, broaden your search, or publish a new challenge.",
-    noResultsEyebrow: "Zero matches",
-    openChallengesEmptyEyebrow: "Empty arena",
-    openChallengesEmptyTitle: "No open challenges right now",
-    openChallengesEmptyDesc:
-      "The arena is quiet. Publish a challenge and set the tone.",
-    openChallengesEmptyCta: "CREATE CHALLENGE",
-    sortHighestConfidence: "Highest confidence",
-    minStakeArenaOnlyHint: "Minimum stake filters Arena Live only",
-    quickFilterNeedsArenaOnlyHint: "Only applies to Arena Live challenges",
-    settlementBasisExpandAria: "Show full settlement basis",
-    settlementBasisCollapseAria: "Collapse settlement basis",
-  },
-  es: {
-    noResults: "Ningún desafío coincide con estos filtros",
-    noResultsDesc:
-      "Probá restablecer los filtros, ampliar la búsqueda o publicar un desafío nuevo.",
-    noResultsEyebrow: "Sin coincidencias",
-    openChallengesEmptyEyebrow: "Arena vacía",
-    openChallengesEmptyTitle: "No hay desafíos abiertos ahora",
-    openChallengesEmptyDesc:
-      "La arena está tranquila. Publicá un desafío y marcá el ritmo.",
-    openChallengesEmptyCta: "CREAR DESAFÍO",
-    sortHighestConfidence: "Mayor confianza",
-    minStakeArenaOnlyHint: "La apuesta mínima filtra solo Arena Live",
-    quickFilterNeedsArenaOnlyHint: "Solo aplica a desafíos en Arena Live",
-    settlementBasisExpandAria: "Ver texto completo de la base de resolución",
-    settlementBasisCollapseAria: "Ocultar texto completo de la base de resolución",
-  },
-};
-
-function mergeExploreMessages(
-  messages: Record<string, unknown>,
-  locale: string
-): Record<string, unknown> {
-  const base =
-    EXPLORE_FALLBACKS[locale] ?? EXPLORE_FALLBACKS[routing.defaultLocale] ?? {};
-  const explore = messages.explore;
-  if (!explore || typeof explore !== "object" || Array.isArray(explore)) {
-    return messages;
+// Provide a recursive deep merge
+function deepMerge(target: any, source: any): any {
+  if (target === null || target === undefined) return source;
+  if (source === null || source === undefined) return target;
+  
+  if (typeof target !== "object" || typeof source !== "object") {
+    return source !== undefined ? source : target;
   }
-  return {
-    ...messages,
-    explore: {
-      ...base,
-      ...(explore as Record<string, string>),
-    },
-  };
+  
+  if (Array.isArray(target) && Array.isArray(source)) {
+    return source; 
+  }
+  
+  const output = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] instanceof Object && !Array.isArray(source[key]) && key in target) {
+      output[key] = deepMerge(target[key], source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
 }
+
+export { deepMerge }; // exported for testing
 
 export default getRequestConfig(async ({ requestLocale }) => {
   const requested = await requestLocale;
@@ -62,13 +33,41 @@ export default getRequestConfig(async ({ requestLocale }) => {
     ? requested!
     : routing.defaultLocale;
 
-  const raw = (await import(`../messages/${locale}.json`)).default as Record<
-    string,
-    unknown
-  >;
+  let raw = {};
+  try {
+    raw = (await import(`../messages/${locale}.json`)).default;
+  } catch (err) {
+    // Missing locale file - next-intl handles this if messages is empty
+  }
+
+  let messages = raw;
+
+  if (locale !== routing.defaultLocale) {
+    try {
+      const defaultRaw = (await import(`../messages/${routing.defaultLocale}.json`)).default;
+      messages = deepMerge(defaultRaw, raw);
+    } catch (err) {
+      // Ignored
+    }
+  }
 
   return {
     locale,
-    messages: mergeExploreMessages(raw, locale),
+    messages,
+    getMessageFallback({ namespace, key, error }) {
+      const path = [namespace, key].filter((part) => part != null).join(".");
+
+      if (error.code === "MISSING_MESSAGE") {
+        // Return raw key to keep contract-first behavior and avoid crashes
+        return path;
+      }
+      return path;
+    },
+    onError(error) {
+      if (error.code === "MISSING_MESSAGE") {
+        return; // Mute missing messages to prevent noisy logs or tracking
+      }
+      console.error(error);
+    },
   };
 });

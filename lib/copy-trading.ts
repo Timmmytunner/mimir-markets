@@ -67,12 +67,16 @@ export interface CopySignal {
   availableLiquidityUsdc: number;
   requiredLiquidityUsdc: number;
   sourceAttributionId: string;
+  /** Optional chain status for callers that have already fetched the live claim. */
+  marketState?: "open" | "active" | "resolved" | "cancelled";
 }
 
 export type CopySkipReason =
   | "global_paused" | "permission_revoked" | "permission_paused" | "permission_expired"
+  | "malformed_signal" | "malformed_context" | "signal_agent_mismatch"
   | "self_copy" | "copy_depth" | "cycle" | "duplicate_position" | "stale_signal"
-  | "market_full" | "liquidity_exhausted" | "category_blocked" | "mode_blocked"
+  | "market_cancelled" | "market_closed" | "market_full" | "liquidity_exhausted"
+  | "category_blocked" | "mode_blocked"
   | "confidence_below_floor" | "payout_below_floor" | "position_cap"
   | "daily_cap" | "weekly_cap" | "open_exposure_cap" | "spend_permission_mismatch"
   | "loss_limit" | "simulation_failed";
@@ -135,8 +139,55 @@ export function evaluateCopy(permission: CopyPermission, signal: CopySignal, con
   if (context.globalPaused) return { allowed: false, reason: "global_paused" };
   if (permission.status === "revoked") return { allowed: false, reason: "permission_revoked" };
   if (permission.status === "paused") return { allowed: false, reason: "permission_paused" };
+  if (!Number.isSafeInteger(context.now) || !context.usage ||
+      typeof context.usage.usedTodayUsdc !== "number" ||
+      typeof context.usage.usedThisWeekUsdc !== "number" ||
+      typeof context.usage.openExposureUsdc !== "number" ||
+      !Number.isSafeInteger(context.usage.usedTodayUsdc * 10_000_000) ||
+      !Number.isSafeInteger(context.usage.usedThisWeekUsdc * 10_000_000) ||
+      !Number.isSafeInteger(context.usage.openExposureUsdc * 10_000_000) ||
+      typeof context.usage.realizedLossAtomic !== "string" ||
+      !/^(0|[1-9]\d*)$/.test(context.usage.realizedLossAtomic) ||
+      typeof context.onchainAllowanceAtomic !== "bigint" || context.onchainAllowanceAtomic < 0n ||
+      typeof context.existingClaimIds?.has !== "function" || !Array.isArray(context.ancestryAgentIds) ||
+      !context.ancestryAgentIds.every((id) => typeof id === "string") ||
+      typeof context.configuredUsdc !== "string" || typeof context.configuredSpender !== "string" ||
+      !context.simulation || typeof context.simulation.ok !== "boolean" ||
+      typeof context.simulation.blockNumber !== "bigint" || context.simulation.blockNumber < 0n) {
+    return { allowed: false, reason: "malformed_context" };
+  }
+  try {
+    parseUsdcAtomic(context.usage.usedTodayUsdc);
+    parseUsdcAtomic(context.usage.usedThisWeekUsdc);
+    parseUsdcAtomic(context.usage.openExposureUsdc);
+  } catch { return { allowed: false, reason: "malformed_context" }; }
   if (context.now >= permission.expiresAt) return { allowed: false, reason: "permission_expired" };
+  if (typeof signal.sourcePositionId !== "string" || !signal.sourcePositionId || signal.sourcePositionId.length > 128 ||
+      typeof signal.sourceAttributionId !== "string" || !signal.sourceAttributionId || signal.sourceAttributionId.length > 128 ||
+      typeof signal.signalAgentId !== "string" || !signal.signalAgentId ||
+      !Number.isSafeInteger(signal.claimId) || signal.claimId < 0 ||
+      !Number.isSafeInteger(signal.sourceDepth) || signal.sourceDepth < 0 ||
+      !Number.isSafeInteger(signal.deadline) ||
+      !Number.isSafeInteger(signal.remainingSlots) ||
+      !Number.isInteger(signal.confidenceBps) || signal.confidenceBps < 0 || signal.confidenceBps > 10_000 ||
+      !Number.isInteger(signal.payoutBps) || signal.payoutBps < 0 ||
+      typeof signal.category !== "string" || typeof signal.mode !== "string" ||
+      !signal.category || !signal.mode ||
+      !Number.isFinite(signal.stakeUsdc) || signal.stakeUsdc < 0 ||
+      !Number.isFinite(signal.availableLiquidityUsdc) || signal.availableLiquidityUsdc < 0 ||
+      !Number.isFinite(signal.requiredLiquidityUsdc) || signal.requiredLiquidityUsdc < 0 ||
+      (signal.marketState !== undefined && !["open", "active", "resolved", "cancelled"].includes(signal.marketState))) {
+    return { allowed: false, reason: "malformed_signal" };
+  }
+  try {
+    parseUsdcAtomic(signal.stakeUsdc);
+    parseUsdcAtomic(signal.availableLiquidityUsdc);
+    parseUsdcAtomic(signal.requiredLiquidityUsdc);
+  } catch { return { allowed: false, reason: "malformed_signal" }; }
   if (signal.signalAgentId === permission.executionAgentId) return { allowed: false, reason: "self_copy" };
+  if (signal.signalAgentId !== permission.signalAgentId) return { allowed: false, reason: "signal_agent_mismatch" };
+  if (signal.marketState === "cancelled") return { allowed: false, reason: "market_cancelled" };
+  if (signal.marketState === "resolved") return { allowed: false, reason: "market_closed" };
   if (signal.sourceDepth >= permission.depth) return { allowed: false, reason: "copy_depth" };
   if (context.ancestryAgentIds.map((id) => id.toLowerCase()).includes(permission.executionAgentId.toLowerCase())) {
     return { allowed: false, reason: "cycle" };

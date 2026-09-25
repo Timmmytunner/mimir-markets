@@ -118,6 +118,8 @@ export const ANALYTICS_EVENTS = [
   "copy_executed",
   "copy_skipped",
   "copy_revoked",
+
+  "basket_ownership_transferred",
 ] as const;
 
 export type AnalyticsEvent = (typeof ANALYTICS_EVENTS)[number];

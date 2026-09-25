@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  classifyTrade, computeAgentPerformance, usdcDisplayToAtomic, windowSinceMs,
+  classifyTrade, computeAgentPerformance, cumulativePnlPoints, usdcDisplayToAtomic, windowSinceMs,
   type AgentTradeRow,
 } from "../../lib/agents/performance";
 import { USDC_UNIT } from "../../lib/usdc";
@@ -120,6 +120,18 @@ test("a time window filters settled history but never hides open exposure", () =
 test("win rate is zero rather than NaN when nothing has been decided", () => {
   const { performance } = computeAgentPerformance([trade({ state: "active", winnerSide: "" })]);
   assert.equal(performance.winRateBps, 0);
+});
+
+test("cumulative P&L chart points use Stellar USDC's canonical 7-decimal scale", () => {
+  const { results } = computeAgentPerformance([
+    trade({ claimId: 1, stake: 2, opposingStake: 2, winnerSide: "creator", settledAt: NOW - 2 * HOUR }),
+    trade({ claimId: 2, stake: 1, winnerSide: "challengers", settledAt: NOW - HOUR }),
+  ]);
+
+  assert.deepEqual(cumulativePnlPoints(results), [
+    { timestamp: NOW - 2 * HOUR, value: 2 },
+    { timestamp: NOW - HOUR, value: 1 },
+  ]);
 });
 
 test("the all-time window has no lower bound", () => {

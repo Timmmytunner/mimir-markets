@@ -47,3 +47,25 @@ export function makeContractFreshness(): VSCacheFreshness {
     source: "contract",
   });
 }
+
+/** A warning applies only to indexed reads, never to an on-chain snapshot. */
+export function isStaleIndexSnapshot(
+  freshness: VSCacheFreshness | null,
+  nowMs = Date.now()
+): boolean {
+  if (!freshness || freshness.source !== "index") return false;
+  if (freshness.status === "stale") return true;
+
+  const updatedAtMs = freshness.lastUpdatedAt
+    ? Date.parse(freshness.lastUpdatedAt)
+    : NaN;
+  if (
+    !Number.isFinite(updatedAtMs) ||
+    !Number.isFinite(freshness.freshnessWindowMs) ||
+    freshness.freshnessWindowMs <= 0
+  ) {
+    return true;
+  }
+
+  return nowMs - updatedAtMs > freshness.freshnessWindowMs * STALE_MULTIPLIER;
+}

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
 import {
-  createApiError,
   parseInviteKey,
   parsePositiveIntegerParam,
 } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import { triggerPostWriteRefresh } from "@/lib/server/vs-index";
 
 export const dynamic = "force-dynamic";
@@ -23,18 +23,14 @@ export async function POST(request: Request) {
     );
 
     if (!claimId) {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "Invalid claim id"),
-        { status: 400 }
-      );
+      const err = apiError("invalid_request", "Invalid claim id", { field: "claimId" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const inviteKey = parseInviteKey(payload.inviteKey ?? null);
     if (inviteKey === null) {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "Invalid invite key"),
-        { status: 400 }
-      );
+      const err = apiError("invalid_request", "Invalid invite key", { field: "inviteKey" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const claim = await triggerPostWriteRefresh({
@@ -54,9 +50,7 @@ export async function POST(request: Request) {
       }
     );
   } catch {
-    return NextResponse.json(
-      createApiError("internal_error", "Unable to refresh VS index"),
-      { status: 500 }
-    );
+    const err = apiError("internal_error", "Unable to refresh VS index");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }

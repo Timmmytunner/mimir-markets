@@ -15,7 +15,7 @@
  * it to Neon only if cross-instance misses show up as real LLM spend.
  */
 
-const TTL_MS = 10 * 60 * 1000;
+export const TTL_MS = 10 * 60 * 1000;
 const MAX_ENTRIES = 200;
 
 export interface CachedReasoning {
@@ -25,7 +25,7 @@ export interface CachedReasoning {
   reasoning: string;
 }
 
-type Entry = CachedReasoning & { at: number };
+export type Entry = CachedReasoning & { at: number };
 
 const entries = new Map<string, Entry>();
 
@@ -35,7 +35,7 @@ export function getCachedReasoning(
   claimId: number,
   slug: string,
   nowMs = Date.now()
-): CachedReasoning | null {
+): Entry | null {
   const key = cacheKey(claimId, slug);
   const hit = entries.get(key);
   if (!hit) {
@@ -46,12 +46,7 @@ export function getCachedReasoning(
     return null;
   }
 
-  return {
-    question: hit.question,
-    sideA: hit.sideA,
-    sideB: hit.sideB,
-    reasoning: hit.reasoning,
-  };
+  return hit;
 }
 
 export function setCachedReasoning(

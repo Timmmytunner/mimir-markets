@@ -2,6 +2,12 @@
 
 import { Activity } from "lucide-react";
 import { useTranslations } from "next-intl";
+import {
+  CREATE_TICKET_BODY_CLASS,
+  CREATE_TICKET_META_GRID_CLASS,
+  CREATE_TICKET_SHELL_CLASS,
+  CREATE_TICKET_WATERMARK_CLASS,
+} from "@/lib/createFormResponsive";
 
 function truncate(s: string, max: number) {
   const t = s.trim();
@@ -61,10 +67,10 @@ export default function CreateChallengeTicket({
   const showQuoted = body.length > 0;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-pv-ink/[0.12] bg-pv-surface/70 shadow-glow-emerald backdrop-blur-[20px] transition-all duration-200">
+    <div className={CREATE_TICKET_SHELL_CLASS}>
       {/* Watermark — transitions from UNSIGNED to SIGNED based on wallet */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden">
-        <span className="font-display text-[72px] sm:text-[96px] font-bold uppercase tracking-[0.15em] text-pv-ink/[0.02] rotate-[-12deg]">
+        <span className={CREATE_TICKET_WATERMARK_CLASS}>
           {walletAddress ? "SIGNED" : "UNSIGNED"}
         </span>
       </div>
@@ -72,7 +78,7 @@ export default function CreateChallengeTicket({
         className="absolute left-0 top-0 h-1 w-full bg-pv-emerald"
         aria-hidden
       />
-      <div className="space-y-8 p-6 sm:p-8">
+      <div className={CREATE_TICKET_BODY_CLASS}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="font-display text-lg font-bold tracking-tighter text-pv-text sm:text-xl">
@@ -91,12 +97,12 @@ export default function CreateChallengeTicket({
         </div>
 
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-4">
+          <div className={CREATE_TICKET_META_GRID_CLASS}>
             <div>
               <div className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-pv-muted">
                 {t("marketType")}
               </div>
-              <span className="text-sm font-semibold text-pv-text">
+              <span className="break-words text-sm font-semibold text-pv-text">
                 {marketTypeLabel}
               </span>
             </div>
@@ -130,7 +136,7 @@ export default function CreateChallengeTicket({
             <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-pv-muted">
               {t("settlementRule")}
             </div>
-            <p className="text-xs italic leading-relaxed text-pv-text/85">
+            <p className="text-xs italic break-words leading-relaxed text-pv-text/85">
               {showQuoted ? (
                 <>
                   <span className="text-pv-muted/70" aria-hidden>

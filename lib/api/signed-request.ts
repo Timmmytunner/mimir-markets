@@ -31,6 +31,15 @@ export const SIGNED_REQUEST_VERSION = 1;
 export const REQUEST_TTL_MS = 60_000;
 /** Tolerance for a client clock running ahead of ours. */
 export const CLOCK_SKEW_MS = 10_000;
+/**
+ * Hard cap on the raw signed request body (UTF-8 bytes).
+ *
+ * Oversized bodies are refused before hashing or crypto so a caller cannot force
+ * the server to hash/parse megabytes just to reject the signature later. 64 KiB
+ * covers every legitimate agent action (stake, reasoning, registration metadata)
+ * while still bounding DoS surface on the money-moving path.
+ */
+export const MAX_SIGNED_REQUEST_BODY_BYTES = 64 * 1024;
 
 export interface SignedRequestEnvelope {
   version: number;
@@ -83,9 +92,33 @@ export function bodyHash(raw: string): string {
   return raw.length === 0 ? "" : sha256Hex(raw);
 }
 
+/** UTF-8 byte length of a string — what Content-Length and the body cap measure. */
+export function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+/**
+ * Refuse a raw body that exceeds {@link MAX_SIGNED_REQUEST_BODY_BYTES}.
+ *
+ * Checked before hashing so the DoS bound does not depend on the caller also
+ * running `verifySignedRequest`. Empty bodies are fine (length 0).
+ */
+export function checkSignedRequestBodySize(rawBody: string): VerifyResult {
+  const bytes = utf8ByteLength(rawBody);
+  if (bytes > MAX_SIGNED_REQUEST_BODY_BYTES) {
+    return {
+      ok: false,
+      reason: "payload_too_large",
+      detail: `body is ${bytes} bytes; max is ${MAX_SIGNED_REQUEST_BODY_BYTES}`,
+    };
+  }
+  return { ok: true };
+}
+
 export type SignedRequestRejection =
   | "unsupported_version"
   | "invalid_request"
+  | "payload_too_large"
   | "request_expired"
   | "nonce_reused"
   | "invalid_signature"
@@ -127,6 +160,11 @@ export interface VerifySignedRequestArgs {
 export function verifySignedRequest(args: VerifySignedRequestArgs): VerifyResult {
   const { envelope } = args;
   const now = args.now ?? Date.now();
+
+  // Bound work before any hashing or field checks: an oversized body must not
+  // reach sha256 or the nonce store.
+  const sizeCheck = checkSignedRequestBodySize(args.rawBody);
+  if (!sizeCheck.ok) return sizeCheck;
 
   if (envelope.version !== SIGNED_REQUEST_VERSION) {
     return {

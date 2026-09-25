@@ -14,30 +14,17 @@ import { isStellarAccount, verifyStellarSignedMessage } from "@/lib/stellar-mess
 
 import { apiError } from "@/lib/api/errors";
 import { authorizeRequest } from "@/lib/api/policy";
-import { validateBasket, type BasketAgentWeight } from "@/lib/baskets";
+import { basketMessage, transferMessage, validateBasket, type BasketAgentWeight } from "@/lib/baskets";
 import { DEFAULT_BASKET_POLICY } from "@/lib/server/basket-directory";
 import { listDirectoryAgents } from "@/lib/server/agent-directory";
 import { insertBasket, listBaskets } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-/**
- * What the creator signs. Readable, because a hardware wallet shows it verbatim.
- *
- * The address is interpolated verbatim: a Stellar strkey is case-sensitive
- * base32, so the `toLowerCase()` this line used to carry — harmless for a hex EVM
- * address — would produce a string no wallet ever signed.
- */
-export function basketMessage(args: {
-  name: string; creator: string; members: Array<{ agentId: string; weightBps: number }>;
-}): string {
-  return [
-    "Mimir basket",
-    `name: ${args.name}`,
-    `creator: ${args.creator}`,
-    `members: ${args.members.map((m) => `${m.agentId}:${m.weightBps}`).join(",")}`,
-  ].join("\n");
-}
+// Re-export so callers that import from this route path still resolve them —
+// the canonical source is now lib/baskets.ts (importable in tests without the
+// Next.js server stack), but nothing outside this file imported these before.
+export { basketMessage, transferMessage };
 
 function slugify(name: string): string {
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
@@ -47,7 +34,11 @@ function clientIp(req: NextRequest): string | undefined {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const gate = authorizeRequest("public_read", { route: "/api/baskets", ip: clientIp(req) });
+  if (!gate.allowed && gate.error) {
+    return NextResponse.json(gate.error.body, { status: gate.error.status, headers: gate.error.headers });
+  }
   const baskets = await listBaskets().catch(() => []);
   return NextResponse.json({ baskets }, { headers: { "cache-control": "no-store" } });
 }

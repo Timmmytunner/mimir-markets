@@ -297,8 +297,17 @@ const SCHEMA_STATEMENTS: SqlStatement[] = [
   { sql: `CREATE TABLE IF NOT EXISTS agent_api_nonces (
     nonce TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
-    consumed_at BIGINT NOT NULL
+    consumed_at BIGINT NOT NULL,
+    -- Epoch ms at which this nonce is no longer a live replay risk. Rows with
+    -- expires_at <= now() are garbage and pruned by pruneExpiredNonces().
+    expires_at BIGINT NOT NULL DEFAULT 0
   )` },
+  // Migrate pre-existing deployments that do not yet have expires_at.
+  // DEFAULT 0 means old rows are treated as already-expired, which is correct:
+  // a nonce consumed before this migration was applied cannot be replayed
+  // (the envelope skew window has long since closed) and should be pruned.
+  { sql: "ALTER TABLE agent_api_nonces ADD COLUMN IF NOT EXISTS expires_at BIGINT NOT NULL DEFAULT 0" },
+  { sql: "CREATE INDEX IF NOT EXISTS idx_agent_api_nonces_expires ON agent_api_nonces(expires_at)" },
   { sql: `CREATE TABLE IF NOT EXISTS agent_api_keys (
     key_id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -314,6 +323,10 @@ const SCHEMA_STATEMENTS: SqlStatement[] = [
   )` },
   { sql: "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_api_keys_hash ON agent_api_keys(key_hash)" },
   { sql: "CREATE INDEX IF NOT EXISTS idx_agent_api_keys_agent ON agent_api_keys(agent_id)" },
+  // Rotation support: keys can now carry an expiry so the old key stays valid
+  // through the overlap window after rotation. Idempotent ALTER TABLE: Postgres
+  // ignores the statement when the column already exists.
+  { sql: "ALTER TABLE agent_api_keys ADD COLUMN IF NOT EXISTS expires_at BIGINT" },
   { sql: `CREATE TABLE IF NOT EXISTS agent_spend_permissions (
     permission_hash TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -452,6 +465,23 @@ const SCHEMA_STATEMENTS: SqlStatement[] = [
   { sql: "CREATE INDEX IF NOT EXISTS idx_payments_v2_resource ON payments_v2(resource)" },
   { sql: "CREATE INDEX IF NOT EXISTS idx_payments_v2_seller ON payments_v2(seller)" },
   { sql: "CREATE INDEX IF NOT EXISTS idx_payments_v2_tx ON payments_v2(network, transaction_hash, resource)" },
+  // The oracle's classic USDC bonus transfer is outside Soroban settlement.
+  // Reserve once before submission; an ambiguous failure stays held for manual
+  // reconciliation rather than risking a second transfer after a restart.
+  { sql: `CREATE TABLE IF NOT EXISTS council_bonus_payouts (
+    network TEXT NOT NULL,
+    contract_id TEXT NOT NULL,
+    claim_id BIGINT NOT NULL CHECK (claim_id > 0),
+    juror_slug TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    amount_atomic NUMERIC(78,0) NOT NULL CHECK (amount_atomic > 0),
+    settlement_tx_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('reserved', 'confirmed', 'review')),
+    payment_tx_hash TEXT,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (network, contract_id, claim_id, juror_slug)
+  )` },
   // Rebuildable read-index for MimirV2 fee events. Every monetary value stays
   // in atomic USDC units; transaction hash + log index makes replay idempotent.
   { sql: `CREATE TABLE IF NOT EXISTS fee_policies (
@@ -615,6 +645,34 @@ const SCHEMA_STATEMENTS: SqlStatement[] = [
     updated_at BIGINT NOT NULL,
     UNIQUE(basket_id, source_block)
   )` },
+  /**
+   * Append-only ownership transfer log for user_baskets.
+   *
+   * The transfer row is written ATOMICALLY with the owner update (same
+   * transaction in transferBasket), so the audit trail can never fall out of
+   * sync with the live row. Rows are never deleted or updated.
+   *
+   * from_wallet / to_wallet are stored verbatim — Stellar strkeys are
+   * case-sensitive base32, and lowercasing them would corrupt the address.
+   */
+  { sql: `CREATE TABLE IF NOT EXISTS basket_ownership_transfers (
+    transfer_id TEXT PRIMARY KEY,
+    basket_id TEXT NOT NULL,
+    from_wallet TEXT NOT NULL,
+    to_wallet TEXT NOT NULL,
+    transferred_at BIGINT NOT NULL,
+    /**
+     * Client-generated nonce from the signed transfer message. UNIQUE enforces
+     * that the same signed authorisation cannot be submitted twice — even if
+     * ownership later cycles back to the original wallet, the old nonce is
+     * permanently consumed. Mirrors the agent_api_nonces pattern.
+     */
+    nonce TEXT NOT NULL,
+    UNIQUE(nonce)
+  )` },
+  { sql: "CREATE INDEX IF NOT EXISTS idx_basket_transfers_basket ON basket_ownership_transfers(basket_id, transferred_at DESC)" },
+  { sql: "CREATE INDEX IF NOT EXISTS idx_basket_transfers_from ON basket_ownership_transfers(from_wallet)" },
+  { sql: "CREATE INDEX IF NOT EXISTS idx_basket_transfers_to ON basket_ownership_transfers(to_wallet)" },
   {
     sql: "INSERT INTO schema_migrations(migration_id, schema_version, checksum, applied_at) VALUES($1, $2, $3, $4) ON CONFLICT(schema_version) DO NOTHING",
     args: ["base-platform-schema-v2", 2, "market-series-profile-conviction-baskets-v2", 0],
@@ -1533,15 +1591,45 @@ export async function getAgentRecord(agentId: string): Promise<AgentRecord | nul
   };
 }
 
-/** Returns false on replay. The nonce insert and audit idempotency are DB-enforced. */
-export async function consumeAgentNonce(agentId: string, nonce: string, at: number): Promise<boolean> {
+/**
+ * Returns false on replay. The nonce insert and audit idempotency are DB-enforced.
+ *
+ * `expiresAt` is the epoch-ms at which this nonce is no longer a live replay
+ * risk. Pass `consumedAt + NONCE_TTL_MS` (from `lib/server/nonce-store.ts`).
+ * Rows whose `expires_at <= now` are dead weight and pruned by
+ * `pruneExpiredNonces`.
+ */
+export async function consumeAgentNonce(
+  agentId: string,
+  nonce: string,
+  at: number,
+  expiresAt: number,
+): Promise<boolean> {
   const pool = await getDb();
   const result = await execute(pool, {
-    sql: `INSERT INTO agent_api_nonces(nonce, agent_id, consumed_at)
-      VALUES (?, ?, ?) ON CONFLICT(nonce) DO NOTHING RETURNING nonce`,
-    args: [nonce, agentId, at],
+    sql: `INSERT INTO agent_api_nonces(nonce, agent_id, consumed_at, expires_at)
+      VALUES (?, ?, ?, ?) ON CONFLICT(nonce) DO NOTHING RETURNING nonce`,
+    args: [nonce, agentId, at, expiresAt],
   });
   return result.rows.length === 1;
+}
+
+/**
+ * Delete nonce rows that are past their expiry.
+ *
+ * Safe to call at any time: rows with `expires_at <= now` are outside the
+ * envelope skew window and can never be presented as a valid replay again.
+ * Returns the number of rows deleted.
+ */
+export async function pruneExpiredNonces(now: number): Promise<number> {
+  const pool = await getDb();
+  // Use pool.query directly so we can read rowCount, which execute() does not
+  // surface (it returns { rows } only).
+  const result = await pool.query(
+    "DELETE FROM agent_api_nonces WHERE expires_at <= $1",
+    [now],
+  );
+  return result.rowCount ?? 0;
 }
 
 export async function insertAgentRequestAudit(row: {
@@ -1991,10 +2079,10 @@ export async function insertAgentApiKey(record: AgentApiKeyRecord): Promise<void
   const pool = await getDb();
   await execute(pool, {
     sql: `INSERT INTO agent_api_keys (
-      key_id, agent_id, key_hash, key_prefix, label, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?)`,
+      key_id, agent_id, key_hash, key_prefix, label, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     args: [record.keyId, record.agentId, record.keyHash, record.keyPrefix,
-      record.label, record.createdAt],
+      record.label, record.createdAt, record.expiresAt ?? null],
   });
 }
 
@@ -2007,6 +2095,7 @@ function toApiKeyRecord(row: Record<string, unknown>): AgentApiKeyRecord {
     label: getString(row.label),
     createdAt: getNumber(row.created_at),
     lastUsedAt: row.last_used_at == null ? undefined : getNumber(row.last_used_at),
+    expiresAt: row.expires_at == null ? undefined : getNumber(row.expires_at),
     revokedAt: row.revoked_at == null ? undefined : getNumber(row.revoked_at),
     revokedReason: row.revoked_reason == null ? undefined : getString(row.revoked_reason),
   };
@@ -2055,6 +2144,28 @@ export async function revokeAgentApiKey(
       WHERE key_id = ? AND agent_id = ? AND revoked_at IS NULL
       RETURNING key_id`,
     args: [at, reason, keyId, agentId],
+  });
+  return result.rows.length > 0;
+}
+
+/**
+ * Set (or clear) the expiry on an existing key without revoking it.
+ *
+ * Used by `rotateKey` to schedule the outgoing key's expiry at `now +
+ * overlap_ms`. An already-revoked key is not modified — revocation takes
+ * precedence and the key is already inaccessible.
+ *
+ * Returns `true` when a row was found and updated.
+ */
+export async function setAgentApiKeyExpiry(
+  agentId: string, keyId: string, expiresAt: number | null,
+): Promise<boolean> {
+  const pool = await getDb();
+  const result = await execute(pool, {
+    sql: `UPDATE agent_api_keys SET expires_at = ?
+      WHERE key_id = ? AND agent_id = ? AND revoked_at IS NULL
+      RETURNING key_id`,
+    args: [expiresAt, keyId, agentId],
   });
   return result.rows.length > 0;
 }
@@ -2203,15 +2314,17 @@ export async function getAgentTradeRows(address: string): Promise<AgentTradeRow[
   // it also discarded the index on those columns.
   const [created, challenged] = await Promise.all([
     execute(pool, {
-      sql: `SELECT id, creator_stake, total_challenger_stake, state, winner_side,
-        updated_at, category, question
-        FROM claims WHERE creator = ? ORDER BY id DESC`,
+      sql: `SELECT c.id, c.creator_stake, c.total_challenger_stake, c.state, c.winner_side,
+        COALESCE(ms.settled_at * 1000, c.updated_at) AS settled_at, c.category, c.question
+        FROM claims c LEFT JOIN market_settlements ms ON ms.claim_id = c.id
+        WHERE c.creator = ? ORDER BY c.id DESC`,
       args: [address],
     }),
     execute(pool, {
       sql: `SELECT c.id, ch.stake, ch.potential_payout, c.state, c.winner_side,
-        c.updated_at, c.category, c.question
+        COALESCE(ms.settled_at * 1000, c.updated_at) AS settled_at, c.category, c.question
         FROM challengers ch JOIN claims c ON c.id = ch.claim_id
+        LEFT JOIN market_settlements ms ON ms.claim_id = c.id
         WHERE ch.address = ? ORDER BY c.id DESC`,
       args: [address],
     }),
@@ -2226,7 +2339,7 @@ export async function getAgentTradeRows(address: string): Promise<AgentTradeRow[
       opposingStake: getNumber(row.total_challenger_stake),
       potentialPayout: 0,
       state: getString(row.state), winnerSide: getString(row.winner_side),
-      settledAt: getNumber(row.updated_at),
+      settledAt: getNumber(row.settled_at),
       category: getString(row.category), question: getString(row.question),
     });
   }
@@ -2237,7 +2350,7 @@ export async function getAgentTradeRows(address: string): Promise<AgentTradeRow[
       stake: getNumber(row.stake), opposingStake: 0,
       potentialPayout: getNumber(row.potential_payout),
       state: getString(row.state), winnerSide: getString(row.winner_side),
-      settledAt: getNumber(row.updated_at),
+      settledAt: getNumber(row.settled_at),
       category: getString(row.category), question: getString(row.question),
     });
   }
@@ -2397,4 +2510,103 @@ export async function listBasketSubscriptions(subscriber: string): Promise<strin
     args: [subscriber],
   });
   return result.rows.map((row) => getString((row as Record<string, unknown>).basket_id));
+}
+
+// ── Basket ownership transfers ────────────────────────────────────────────────
+
+export interface BasketOwnershipTransfer {
+  transferId: string;
+  basketId: string;
+  fromWallet: string;
+  toWallet: string;
+  transferredAt: number;
+  /** The client-supplied nonce that was consumed for this transfer. */
+  nonce: string;
+}
+
+/**
+ * Atomically update creator_wallet and write an audit row.
+ *
+ * The update and insert run in a single transaction so the audit trail can
+ * never diverge from the live owner. Both wallet values are stored verbatim:
+ * Stellar strkeys are case-sensitive base32, and lowercasing them would
+ * produce strings that match nothing stored.
+ *
+ * Returns false if `fromWallet` no longer matches the row (concurrent transfer
+ * or stale client), so the caller can surface a clear conflict error rather
+ * than a generic 500.
+ *
+ * The nonce is stored with a UNIQUE constraint. If the same signed payload is
+ * submitted twice — or if ownership cycles back and an old signature is
+ * replayed — the INSERT throws a unique-constraint violation and the
+ * transaction rolls back, causing this function to throw. The caller (the
+ * PATCH route) catches that as a 409 conflict, distinct from the false return
+ * which means "owner mismatch at UPDATE time".
+ */
+export async function transferBasket(args: {
+  transferId: string;
+  basketId: string;
+  fromWallet: string;
+  toWallet: string;
+  nonce: string;
+  at: number;
+}): Promise<boolean> {
+  const pool = await getDb();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Conditional update: only touches the row when the current owner still
+    // matches. RETURNING lets us detect whether the update actually fired.
+    const update = await client.query(
+      toPg(`UPDATE user_baskets SET creator_wallet = ?
+        WHERE basket_id = ? AND creator_wallet = ?
+        RETURNING basket_id`),
+      [args.toWallet, args.basketId, args.fromWallet],
+    );
+    if (update.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return false; // basket not found, or currentOwner no longer matches
+    }
+
+    // The UNIQUE(nonce) constraint here is the replay guard: inserting a nonce
+    // that already exists throws, rolls the transaction back, and the caller
+    // surfaces it as a conflict. This is the same atomic pattern as
+    // consumeAgentNonce / agent_api_nonces.
+    await client.query(
+      toPg(`INSERT INTO basket_ownership_transfers
+        (transfer_id, basket_id, from_wallet, to_wallet, transferred_at, nonce)
+        VALUES (?, ?, ?, ?, ?, ?)`),
+      [args.transferId, args.basketId, args.fromWallet, args.toWallet, args.at, args.nonce],
+    );
+
+    await client.query("COMMIT");
+    return true;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Full transfer history for a basket, newest first. */
+export async function getBasketTransferHistory(basketId: string): Promise<BasketOwnershipTransfer[]> {
+  const pool = await getDb();
+  const result = await execute(pool, {
+    sql: `SELECT * FROM basket_ownership_transfers
+      WHERE basket_id = ? ORDER BY transferred_at DESC`,
+    args: [basketId],
+  });
+  return result.rows.map((raw) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      transferId: getString(row.transfer_id),
+      basketId: getString(row.basket_id),
+      fromWallet: getString(row.from_wallet),
+      toWallet: getString(row.to_wallet),
+      transferredAt: getNumber(row.transferred_at),
+      nonce: getString(row.nonce),
+    };
+  });
 }

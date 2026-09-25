@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  createApiError,
   parseAddressParam,
 } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import { getUserVsSnapshot } from "@/lib/server/vs-index";
 import { VS_CACHE_HEADERS } from "@/lib/server/vs-cache";
 
@@ -17,22 +17,14 @@ export async function GET(
     const { address: rawAddress } = await params;
     const address = parseAddressParam(rawAddress);
     if (!address) {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "Invalid address"),
-        {
-          status: 400,
-        }
-      );
+      const err = apiError("invalid_request", "Invalid address", { field: "address" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const refreshValue = new URL(request.url).searchParams.get("refresh");
     if (refreshValue && refreshValue !== "1") {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "refresh must be 1 when provided"),
-        {
-          status: 400,
-        }
-      );
+      const err = apiError("invalid_request", "refresh must be 1 when provided", { field: "refresh" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const { items, cache } = await getUserVsSnapshot(address, {
@@ -50,11 +42,7 @@ export async function GET(
       }
     );
   } catch {
-    return NextResponse.json(
-      createApiError("internal_error", "Unable to load user VS"),
-      {
-        status: 500,
-      }
-    );
+    const err = apiError("internal_error", "Unable to load user VS");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }

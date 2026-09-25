@@ -176,8 +176,11 @@ export interface FeeSplit {
 /**
  * Split one winner's payout into principal, fees and net profit.
  *
- * Integer division truncates, which means fees round DOWN — in the participant's
- * favour. The remainder is not lost: `settleMarket` accounts for it as dust.
+ * Each leg truncates, so fees round DOWN in the participant's favour, and the
+ * remainder stays in the payout (`payout = gross - fees`), so fee rounding never
+ * creates dust. A leg with no recipient is not charged, exactly as `quote_fees`
+ * in `contracts-soroban/mimir-market/src/fees.rs`: an unattributed market still
+ * snapshots the policy's owner bps, but there is nobody to pay it to.
  */
 export function splitFees(args: {
   principalUnits: bigint;
@@ -203,10 +206,12 @@ export function splitFees(args: {
   const grossProfitUnits =
     grossPayoutUnits > principalUnits ? grossPayoutUnits - principalUnits : 0n;
 
-  const platformFeeUnits =
-    (grossProfitUnits * BigInt(snapshot.platformFeeBps)) / BPS_DIVISOR;
-  const agentOwnerFeeUnits =
-    (grossProfitUnits * BigInt(snapshot.agentOwnerFeeBps)) / BPS_DIVISOR;
+  const platformFeeUnits = hasRecipient(snapshot.platformRecipient)
+    ? (grossProfitUnits * BigInt(snapshot.platformFeeBps)) / BPS_DIVISOR
+    : 0n;
+  const agentOwnerFeeUnits = hasRecipient(snapshot.agentOwnerRecipient)
+    ? (grossProfitUnits * BigInt(snapshot.agentOwnerFeeBps)) / BPS_DIVISOR
+    : 0n;
 
   const netProfitUnits = grossProfitUnits - platformFeeUnits - agentOwnerFeeUnits;
   return {
@@ -261,8 +266,8 @@ export interface MarketSettlement {
  *
  *   sum(payouts) + platformFees + agentOwnerFees + dust == escrowInflow
  *
- * Dust is the deliberate slack: pool shares and fees both truncate, so a few
- * units can be left over. They stay in escrow and are reported, because a
+ * Dust is the deliberate slack: pool shares truncate, so a few units can be left
+ * over. (Fee truncation leaves its remainder in the payout, not in dust.) They stay in escrow and are reported, because a
  * conservation check that ignores a residue does not prove conservation.
  */
 export function settleMarket(args: {

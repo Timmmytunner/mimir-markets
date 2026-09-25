@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  createApiError,
   parseInviteKey,
   parsePositiveIntegerParam,
 } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import { getVsDetailSnapshot, getVsWithInvite } from "@/lib/server/vs-index";
 import { makeContractFreshness } from "@/lib/vs-freshness";
 import { VS_CACHE_HEADERS } from "@/lib/server/vs-cache";
@@ -19,35 +19,23 @@ export async function GET(
     const { id } = await params;
     const vsId = parsePositiveIntegerParam(id);
     if (!vsId) {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "Invalid VS id"),
-        {
-          status: 400,
-        }
-      );
+      const err = apiError("invalid_request", "Invalid VS id", { field: "id" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const inviteKey = parseInviteKey(
       new URL(request.url).searchParams.get("invite")
     );
     if (inviteKey === null) {
-      return NextResponse.json(
-        createApiError("invalid_parameter", "Invalid invite key"),
-        {
-          status: 400,
-        }
-      );
+      const err = apiError("invalid_request", "Invalid invite key", { field: "invite" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     if (inviteKey) {
       const privateItem = await getVsWithInvite(vsId, inviteKey);
       if (!privateItem) {
-        return NextResponse.json(
-          createApiError("not_found", "VS not found"),
-          {
-            status: 404,
-          }
-        );
+        const err = apiError("not_found", "VS not found");
+        return NextResponse.json(err.body, { status: err.status, headers: err.headers });
       }
 
       return NextResponse.json(
@@ -65,12 +53,8 @@ export async function GET(
 
     const { item, cache } = await getVsDetailSnapshot(vsId);
     if (!item) {
-      return NextResponse.json(
-        createApiError("not_found", "VS not found"),
-        {
-          status: 404,
-        }
-      );
+      const err = apiError("not_found", "VS not found");
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     return NextResponse.json(
@@ -83,11 +67,7 @@ export async function GET(
       }
     );
   } catch {
-    return NextResponse.json(
-      createApiError("internal_error", "Unable to load VS"),
-      {
-        status: 500,
-      }
-    );
+    const err = apiError("internal_error", "Unable to load VS");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }

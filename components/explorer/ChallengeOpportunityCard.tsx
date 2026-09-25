@@ -20,6 +20,7 @@ const exploreFilterPanelHeightTransition = {
 };
 
 import type { ChallengeOpportunity } from "@/lib/claimDrafts";
+import { formatDeadline } from "@/lib/constants";
 
 type ChallengeOpportunityCardProps = {
   opportunity: ChallengeOpportunity;
@@ -107,13 +108,12 @@ export default function ChallengeOpportunityCard({
       return opportunity.candidate.deadlineAt;
     }
 
-    return date.toLocaleString(locale === "en" ? "en-US" : "es-AR", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Wall clock in the viewer's timezone (with short TZ name), not the
+    // settlement-rule timezone — chain timestamp stays the source of truth.
+    return formatDeadline(
+      Math.floor(date.getTime() / 1000),
+      locale === "en" ? "en" : "es"
+    );
   }, [locale, opportunity.candidate.deadlineAt]);
 
   const sourceHostname = useMemo(() => {

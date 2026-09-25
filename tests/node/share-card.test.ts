@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SHARE_REF_VALUE, getShareUrl } from "../../lib/constants";
+import { SHARE_REF_VALUE, ZERO_ADDRESS, getShareUrl, shortenAddress } from "../../lib/constants";
 import {
   CARD_SIZES,
   MAX_CLAIM_CHARS,
   buildShareCard,
   formatPot,
+  isAbsentIdentity,
   isCardSize,
+  isWalletAddress,
+  resolveIdentity,
   shareCardDomain,
   shareCardPath,
   shareUrlLeaksInviteKey,
@@ -119,6 +122,84 @@ test("missing avatars use deterministic identity fallbacks", () => {
   );
   assert.equal(identities.avatarFallbackA, "AL");
   assert.equal(identities.avatarFallbackB, "0x");
+});
+
+// ── Wallet addresses (privacy: handled explicitly, never printed whole) ───────
+
+const STELLAR_CREATOR = `G${"A".repeat(55)}`;
+const STELLAR_CHALLENGER = `G${"B".repeat(55)}`;
+
+function serialized(card: ReturnType<typeof buildShareCard>): string {
+  return JSON.stringify(card);
+}
+
+test("a public card shortens a wallet address instead of publishing it whole", () => {
+  const card = buildShareCard(
+    input({ creatorIdentity: STELLAR_CREATOR, challengerIdentity: STELLAR_CHALLENGER }),
+  );
+  assert.equal(card.actorA, shortenAddress(STELLAR_CREATOR));
+  assert.equal(card.actorB, shortenAddress(STELLAR_CHALLENGER));
+  assert.equal(serialized(card).includes(STELLAR_CREATOR), false, "the creator address leaked");
+  assert.equal(serialized(card).includes(STELLAR_CHALLENGER), false, "the challenger address leaked");
+});
+
+test("address shortening keeps both ends so the label stays recognisable", () => {
+  const card = buildShareCard(input({ creatorIdentity: STELLAR_CREATOR }));
+  assert.ok(card.actorA.includes("..."), "a shortened address is still a recognisable label");
+  assert.ok(card.actorA.length < STELLAR_CREATOR.length);
+});
+
+test("an absent challenger never prints the zero-address sentinel", () => {
+  // decodeClaim writes ZERO_ADDRESS when a claim has no challenger yet, so this
+  // is the common case, not an edge case.
+  const card = buildShareCard(input({ challengerIdentity: ZERO_ADDRESS }));
+  assert.equal(card.actorB, "Challenger side");
+  assert.equal(card.avatarFallbackB, "CS");
+  assert.equal(serialized(card).includes("0x0000"), false, "the sentinel leaked onto the card");
+});
+
+test("a duel with no rival says Open rival, not an address", () => {
+  const card = buildShareCard(input({ mode: DUEL, challengerIdentity: ZERO_ADDRESS }));
+  assert.equal(card.actorB, "Open rival");
+});
+
+test("a display name is never shortened", () => {
+  const card = buildShareCard(input({ creatorIdentity: "Ada Lovelace" }));
+  assert.equal(card.actorA, "Ada Lovelace");
+  assert.equal(card.avatarFallbackA, "AL");
+});
+
+// ── Address detection boundaries ──────────────────────────────────────────────
+
+test("account, contract and EVM addresses are recognised as wallets", () => {
+  assert.equal(isWalletAddress(STELLAR_CREATOR), true);
+  assert.equal(isWalletAddress(`C${"A".repeat(55)}`), true, "contract strkeys count too");
+  assert.equal(isWalletAddress(`0x${"a".repeat(40)}`), true);
+});
+
+test("display names and short hex are not misread as addresses", () => {
+  assert.equal(isWalletAddress("Ada Lovelace"), false);
+  assert.equal(isWalletAddress("creator.mimir"), false);
+  // A short hex pseudonym is a name, not a 20-byte address — shortening it would
+  // make it longer than it started.
+  assert.equal(isWalletAddress("0xabc123"), false);
+});
+
+test("absence covers empty, whitespace, the sentinel and all-zero addresses", () => {
+  assert.equal(isAbsentIdentity(""), true);
+  assert.equal(isAbsentIdentity("   "), true);
+  assert.equal(isAbsentIdentity(undefined), true);
+  assert.equal(isAbsentIdentity(ZERO_ADDRESS), true);
+  assert.equal(isAbsentIdentity(`0x${"0".repeat(40)}`), true);
+  assert.equal(isAbsentIdentity("0xabc123"), false);
+  assert.equal(isAbsentIdentity(STELLAR_CREATOR), false);
+});
+
+test("resolveIdentity falls back rather than returning the sentinel", () => {
+  assert.equal(resolveIdentity(ZERO_ADDRESS, "Creator"), "Creator");
+  assert.equal(resolveIdentity(undefined, "Creator"), "Creator");
+  assert.equal(resolveIdentity("  ", "Creator"), "Creator");
+  assert.equal(resolveIdentity(STELLAR_CREATOR, "Creator"), shortenAddress(STELLAR_CREATOR));
 });
 
 test("duel cards use duel language and rival wording", () => {

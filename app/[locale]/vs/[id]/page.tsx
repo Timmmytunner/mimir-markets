@@ -31,8 +31,9 @@ import {
 } from "@/lib/contract";
 import { getExplorerTxUrl, waitForTransaction } from "@/lib/stellar";
 import { buildSeriesView } from "@/lib/series-view";
-import { getPendingVS } from "@/lib/pending-vs";
 import { openPeepsAvatar } from "@/lib/avatars";
+import { useVsDetail } from "@/hooks/useVsDetail";
+import CacheFreshnessControls from "@/components/CacheFreshnessControls";
 import { formatUsdc } from "@/lib/money";
 import {
   availableCreatorLiquidityUnits,
@@ -42,11 +43,13 @@ import {
 import { unitsToUsdc, usdcToUnits } from "@/lib/usdc";
 import { toCanonicalMode } from "@/lib/market-modes";
 import { MarketAnalytics } from "@/components/MarketAnalytics";
+import { MarketPanelSkeleton, RivalryPanelSkeleton } from "@/components/ui/AsyncPanelSkeleton";
 import { track } from "@/lib/analytics/client";
 import { idempotencyKey } from "@/lib/analytics/events";
 import { stakeBucket } from "@/lib/analytics/useMarketAnalytics";
 import ReasoningFeed from "@/components/vs/ReasoningFeed";
 import { acquireTxLock } from "@/lib/tx-lock";
+import { evaluateUsdcTrustlineGate } from "@/lib/usdcTrustlineGate";
 import {
   MIN_STAKE,
   ZERO_ADDRESS,
@@ -55,8 +58,6 @@ import {
 } from "@/lib/constants";
 import {
   MOCK_CREATED_VS_ID,
-  mergeMockSnapshotIntoVs,
-  readCreateMockSnapshot,
 } from "@/lib/mockVsCreate";
 import { SAMPLE_VS } from "@/lib/sampleVs";
 import { useCountdown } from "@/lib/hooks";
@@ -80,7 +81,10 @@ import ResolutionTerminal from "@/components/ResolutionTerminal";
 import { ShareMarket } from "@/components/vs/ShareMarket";
 import { ProfileLink } from "@/components/ui/AddressChip";
 import ClaimPayoutCard from "@/components/vs/ClaimPayoutCard";
-import { UsdcTrustlineGate } from "@/components/wallet/UsdcTrustlineGate";
+import {
+  UsdcTrustlineGate,
+  useUsdcTrustline,
+} from "@/components/wallet/UsdcTrustlineGate";
 import VsXmtpPanel from "@/components/xmtp/VsXmtpPanel";
 import CouncilVoteWidget from "@/components/council/CouncilVoteWidget";
 import Stage from "@/components/Stage";
@@ -568,10 +572,6 @@ function txToastOptions(result: {
     : undefined;
 }
 
-// On-chain refresh cadence; the loading spinner gives up after
-// MAX_FETCH_ATTEMPTS * VS_POLL_INTERVAL_MS (~2 min).
-const VS_POLL_INTERVAL_MS = 10_000;
-const MAX_FETCH_ATTEMPTS = 12;
 // How long the verdict overlay / seal stamp stays on screen.
 const VERDICT_OVERLAY_MS = 4000;
 // Resolution terminal types line by line; phases advance on this cadence and
@@ -750,26 +750,43 @@ export default function VSDetailPage() {
   const isSampleVS = vsId < 0 && !!SAMPLE_VS[vsId];
   const inviteFromUrl = searchParams.get("invite")?.trim() ?? "";
   const { address, isConnected, connect, signer } = useWallet();
+  const trustline = useUsdcTrustline();
   const t = useTranslations("vsDetail");
+  const tWallet = useTranslations("wallet");
   const tc = useTranslations("common");
   const tStamp = useTranslations("stamp");
   const tBadges = useTranslations("badges");
 
-  const [vs, setVS] = useState<VSData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchAttempts, setFetchAttempts] = useState(0);
+  const [storedInviteKey, setStoredInviteKey] = useState("");
+
+  const inviteKey = inviteFromUrl || storedInviteKey;
+
+  // ── useVsDetail: generation-guarded polling, freshness, user-context ────────
+  const {
+    phase: vsPhase,
+    vs,
+    cache: vsFreshness,
+    fetchAttempts,
+    refreshing,
+    challengeStake,
+    setChallengeStake,
+    resetChallengeStake,
+    refresh: refreshVs,
+  } = useVsDetail({ vsId, address, inviteKey, isSampleVS });
+
+  /** Convenience: true during initial load (skeleton shown). */
+  const loading = vsPhase === "loading";
+
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [resolvePhase, setResolvePhase] = useState(-1);
   const [showVerdict, setShowVerdict] = useState(false);
-  const [challengeStake, setChallengeStake] = useState("");
   const [rivalryChain, setRivalryChain] = useState<VSData[]>([]);
   const [rivalryLoading, setRivalryLoading] = useState(false);
   // Evita parpadeos: si cambiamos de `vs.id` o aún no terminó el fetch,
   // mostramos "loading" en vez de "empty" con datos viejos/vacíos.
   const [rivalryLoadedForVsId, setRivalryLoadedForVsId] = useState<number | null>(null);
   const [isRivalryExpanded, setIsRivalryExpanded] = useState(false);
-  const [storedInviteKey, setStoredInviteKey] = useState("");
   const [marketTermsOpen, setMarketTermsOpen] = useState(false);
   const marketTermsHeadingId = useId();
   const marketTermsPanelId = useId();
@@ -783,8 +800,6 @@ export default function VSDetailPage() {
   const [, setHasAttemptedResolve] = useState(false);
 
   const countdown = useCountdown(vs?.deadline || 0);
-
-  const inviteKey = inviteFromUrl || storedInviteKey;
 
   useEffect(() => {
     setDesignLifecycleStep(null);
@@ -822,54 +837,11 @@ export default function VSDetailPage() {
     setStoredInviteKey(getStoredPrivateInviteKey(vsId));
   }, [inviteFromUrl, isSampleVS, vsId]);
 
-  const fetchVS = useCallback(async () => {
-    if (isSampleVS) {
-      let data = SAMPLE_VS[vsId];
-      if (vsId === MOCK_CREATED_VS_ID) {
-        const snap = readCreateMockSnapshot();
-        if (snap) {
-          data = mergeMockSnapshotIntoVs(data, snap);
-        }
-      }
-      setVS(data);
-      setLoading(false);
-      return;
-    }
-
-    const data = await getVS(vsId, {
-      inviteKey,
-      viewerAddress: address ?? undefined,
-    });
-    if (data) {
-      setVS(data);
-      setLoading(false);
-      setFetchAttempts(0);
-    } else {
-      // Show optimistic data from localStorage while consensus is pending
-      const pending = getPendingVS(vsId);
-      if (pending) {
-        setVS(pending);
-        setLoading(false);
-      }
-      // Keep polling — once on-chain data arrives it replaces the pending item.
-      // Give up on the loading spinner after ~2 min.
-      setFetchAttempts((prev) => {
-        const next = prev + 1;
-        if (next >= MAX_FETCH_ATTEMPTS) setLoading(false);
-        return next;
-      });
-    }
-  }, [address, inviteKey, isSampleVS, vsId]);
-
-  useEffect(() => {
-    fetchVS();
-    if (isSampleVS) {
-      return;
-    }
-
-    const intervalId = setInterval(fetchVS, VS_POLL_INTERVAL_MS);
-    return () => clearInterval(intervalId);
-  }, [fetchVS, isSampleVS]);
+  /**
+   * Alias kept for the resolve-tx watcher and ClaimPayoutCard so that existing
+   * call sites read naturally.  Delegates to the hook's `refresh`.
+   */
+  const fetchVS = useCallback(() => refreshVs(), [refreshVs]);
 
   useEffect(() => {
     if (!vs || vs.state !== "resolved" || !pendingResolveRef.current) {
@@ -924,16 +896,6 @@ export default function VSDetailPage() {
       cancelled = true;
     };
   }, [address, fetchVS, isSampleVS, pendingResolveTxHash, t]);
-
-  useEffect(() => {
-    setChallengeStake("");
-  }, [vsId]);
-
-  useEffect(() => {
-    if (vs && challengeStake === "") {
-      setChallengeStake(String(vs.stake_amount));
-    }
-  }, [challengeStake, vs]);
 
   useEffect(() => {
     // La rivalry chain puede ser costosa y además se recalcula en cada refresh del VS.
@@ -1038,9 +1000,9 @@ export default function VSDetailPage() {
 
   if (loading) {
     return (
-      <div className="text-center py-20">
-        <div className="w-10 h-10 border-2 border-transparent border-t-pv-emerald rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-pv-muted text-sm">
+      <div>
+        <MarketPanelSkeleton />
+        <p className="sr-only">
           {fetchAttempts > 1 ? t("submittedPending") : tc("loading")}
         </p>
       </div>
@@ -1073,6 +1035,14 @@ export default function VSDetailPage() {
     !missingPrivateInvite &&
     isVSJoinable(vs, address) &&
     isConnected;
+  const acceptTrustlineGate = evaluateUsdcTrustlineGate({
+    action: "accept",
+    status: trustline.status,
+    loading: trustline.loading,
+    stale: trustline.stale,
+    isConnected,
+    hasSigner: Boolean(signer),
+  });
   const canCancel = !isSampleVS && vs.state === "open" && isCreator;
   const hasWinner = hasVSWinner(display);
   const creatorRequestedResolve = Boolean(display.creator_requested_resolve);
@@ -1238,6 +1208,10 @@ export default function VSDetailPage() {
       toast.error(t("invalidChallengeStakeMin", { amount: MIN_STAKE }));
       return;
     }
+    if (!acceptTrustlineGate.allowed) {
+      toast.error(tWallet(acceptTrustlineGate.messageKey));
+      return;
+    }
 
     await withTxLock(async (wallet) => {
     flushSync(() => {
@@ -1250,12 +1224,12 @@ export default function VSDetailPage() {
       });
 
       if (!liveVS) {
-        setVS(null);
+        void fetchVS();
         toast.error(t("notFound"));
         return;
       }
 
-      setVS(liveVS);
+      void fetchVS();
 
       if (!isVSJoinable(liveVS, address)) {
         toast.error(t("challengeUnavailable"));
@@ -1307,6 +1281,7 @@ export default function VSDetailPage() {
             }),
         txToastOptions(result)
       );
+      resetChallengeStake();
       fetchVS();
     } catch (err: any) {
       track({
@@ -1528,6 +1503,19 @@ export default function VSDetailPage() {
                 ) : null}
               </div>
             )}
+          </AnimatedItem>
+        )}
+
+        {/* Freshness pill + manual refresh — only for real on-chain markets, not sample previews */}
+        {!isSampleVS && (vsFreshness || refreshing) && (
+          <AnimatedItem>
+            <div className="mb-6 sm:mb-8">
+              <CacheFreshnessControls
+                freshness={vsFreshness}
+                onRefresh={refreshVs}
+                refreshing={refreshing}
+              />
+            </div>
           </AnimatedItem>
         )}
 
@@ -1927,7 +1915,7 @@ export default function VSDetailPage() {
               {/* A brand-new Stellar account cannot hold USDC until it trusts the
                   issuer, so the first-ever stake needs this once. Renders nothing
                   for an account that is already set up. */}
-              {canAccept && <UsdcTrustlineGate />}
+              {canAccept && <UsdcTrustlineGate trustline={trustline} />}
 
               {canAccept && (
                 <GlassCard glass className="!rounded-2xl border border-pv-ink/[0.12]">
@@ -1945,7 +1933,7 @@ export default function VSDetailPage() {
                         variant="fuch"
                         onClick={handleAccept}
                         loading={actionLoading === "accept"}
-                        disabled={!hasValidChallengeStake}
+                        disabled={!hasValidChallengeStake || !acceptTrustlineGate.allowed}
                         className="h-[3.25rem] w-full"
                       >
                         {actionLoading === "accept"
@@ -2427,9 +2415,7 @@ export default function VSDetailPage() {
                         </div>
 
                         {!isRivalryDataReady || rivalryLoading ? (
-                          <div className="rounded-xl border border-pv-ink/[0.08] bg-pv-bg/30 p-4 sm:p-5">
-                            <p className="text-sm text-pv-muted">{tc("loading")}</p>
-                          </div>
+                          <RivalryPanelSkeleton />
                         ) : seriesView.rows.length > 1 ? (
                           <div className="rounded-xl border border-pv-ink/[0.08] bg-pv-bg/30 p-4 sm:p-5">
                             <div className="space-y-3">

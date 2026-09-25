@@ -20,6 +20,8 @@
     "live": "Live",
     "cached": "Cached",
     "stale": "Stale",
+    "staleWarningTitle": "Challenge data may be out of date.",
+    "staleWarningDescription": "The read index is behind or its last update is unknown. Check the latest on-chain details before making a decision.",
     "refresh": "Refresh",
     "refreshing": "Refreshing",
     "sourceIndex": "indexed cache",
@@ -644,6 +646,28 @@
       "challengers": "Challenger side wins",
       "draw": "Draw",
       "unresolvable": "Marked unresolvable"
+    },
+    "receiptPot": "Total pot",
+    "receiptRemainingEscrow": "Remaining escrow",
+    "receiptWinner": "Winner address",
+    "receiptOutcomeNone": "No outcome recorded",
+    "receiptValueUnavailable": "—",
+    "receiptChainNote": "Amounts and outcome come from the on-chain claim record. Challenger payouts stay pull-based after settlement.",
+    "receiptStatus": {
+      "loading": "Loading",
+      "invalid": "Not settled",
+      "stale": "Stale",
+      "disconnected": "Disconnected",
+      "dependency_failure": "Unavailable",
+      "ready": "Final"
+    },
+    "receiptStatusHint": {
+      "loading": "Fetching the contract-backed settlement receipt.",
+      "invalid": "This claim is not settled yet, so no settlement receipt is available.",
+      "stale": "Showing the last known settlement receipt. Refresh if the market may have changed.",
+      "disconnected": "Wallet or network is disconnected. Reconnect to verify the live on-chain receipt.",
+      "dependency_failure": "Settlement fields could not be mapped from the claim record. Retry after the index catches up.",
+      "ready": "Contract-backed settlement receipt for this claim."
     }
   },
   "dashboard": {
@@ -654,6 +678,18 @@
     "challengesLostTitle": "Challenges lost",
     "winRate": "Win Rate",
     "totalWon": "Total Winnings",
+    "portfolioPerformanceTitle": "Realised portfolio P&L",
+    "portfolioPerformanceHint": "Settled market profit and loss from your wallet. Open positions are not marked as gains.",
+    "portfolioPerformanceAria": "Realised portfolio performance",
+    "portfolioPerformanceChartLabel": "Realised portfolio P&L",
+    "portfolioPerformanceEmpty": "No settled results yet — the curve starts with your first settlement.",
+    "portfolioPerformanceInvalid": "Performance data could not be validated.",
+    "portfolioPerformanceError": "Portfolio performance is temporarily unavailable. No value has been substituted for the missing data.",
+    "portfolioPerformanceRetry": "Try again",
+    "portfolioPerformanceRefresh": "Reload",
+    "portfolioPerformanceRefreshing": "Reloading…",
+    "portfolioPerformanceRefreshFailed": "Reload failed. Showing the last validated performance snapshot.",
+    "portfolioPerformanceStale": "The settlement index is stale. Values shown are the last validated settled-market snapshot.",
     "tabAll": "All",
     "tabActive": "Active",
     "tabDone": "Resolved",
@@ -922,6 +958,10 @@
     "expiredNoRivalHintCreator": "Challenges are now closed because the deadline has passed. Cancel to reclaim your stake.",
     "expiredNoRivalHintViewer": "Challenges are now closed because the deadline has passed without a rival joining.",
     "notFound": "VS not found",
+    "loadingRetry": "Waiting for on-chain data…",
+    "dependencyFailure": "Could not reach the contract. Check your connection and try again.",
+    "invalidMarketId": "Invalid market ID.",
+    "refreshAriaLabel": "Refresh market data",
     "progressAriaLabel": "Challenge lifecycle progress",
     "progressSectionKicker": "Challenge lifecycle",
     "progressStepFraction": "Step {current} of {total}",
@@ -1006,7 +1046,21 @@
     "withdrawSuccess": "Withdrew {amount} USDC.",
     "claimFeesSuccess": "Claimed {amount} USDC in fees.",
     "loadFailed": "Could not read your balances. Try again in a moment.",
-    "cannotSign": "This wallet cannot sign transactions. Reconnect it and try again."
+    "cannotSign": "This wallet cannot sign transactions. Reconnect it and try again.",
+    "connectWalletFirst": "Connect a Stellar wallet before continuing.",
+    "trustlineChecking": "Checking your USDC trustline...",
+    "trustlineStale": "Your wallet changed while the USDC trustline was being checked. Check it again before continuing.",
+    "trustlineRetry": "Check again",
+    "trustlineCheckFailedTitle": "Could not check USDC trustline",
+    "trustlineCheckFailedHint": "Mimir could not verify the Stellar network right now. Try again before signing.",
+    "trustlineUnfundedTitle": "Account not funded",
+    "trustlineUnfunded": "Fund this Stellar account with XLM before adding a USDC trustline.",
+    "trustlineUnfundedHint": "This wallet has no account on the Stellar ledger yet. Add a little XLM before it can hold USDC or sign anything.",
+    "trustlineMissingTitle": "One-time setup",
+    "trustlineMissingHint": "Stellar accounts hold an asset only after they trust its issuer. Add the USDC trustline once before your first stake.",
+    "trustlineAdd": "Add USDC trustline",
+    "trustlineAdding": "Confirm in wallet...",
+    "trustlineRejected": "Trustline signature rejected in your wallet."
   },
   "categories": {
     "sports": "Sports",
@@ -1148,5 +1202,43 @@
     "fresh_minutes": "captured {value}m ago",
     "fresh_hours": "captured {value}h ago",
     "fresh_days": "captured {value}d ago"
+  },
+  "researchCitations": {
+    "title": "Research sources",
+    "excerpt": "Excerpt",
+    "noHash": "No content hash",
+    "unsafeLink": "Link blocked",
+    "duplicatedNote": "{count} duplicate source(s) collapsed.",
+    "privacyNote": "Citations show public source links and content hashes only — no wallet addresses, prompts, or analytics identifiers.",
+    "trust": {
+      "primary": "Primary",
+      "corroborating": "Corroborating",
+      "unverified": "Unverified",
+      "unknown": "Unspecified"
+    },
+    "status": {
+      "ready": "Cited",
+      "empty": "No sources",
+      "invalid": "Invalid",
+      "stale": "Stale",
+      "cancelled": "Cancelled",
+      "dependency_failure": "Unavailable"
+    },
+    "statusHint": {
+      "ready": "Research-source citations for this claim. Hashes let you verify the page later.",
+      "empty": "No research sources were attached to this view.",
+      "invalid": "Source links were missing or unsafe, so citations are not shown.",
+      "stale": "Cited sources look stale relative to the claim deadline or freshness window.",
+      "cancelled": "This claim is cancelled, so research citations are withheld.",
+      "dependency_failure": "Citation fields could not be mapped from the source record."
+    },
+    "rowStatus": {
+      "ready": "Ready",
+      "invalid": "Invalid",
+      "stale": "Stale",
+      "duplicated": "Duplicate",
+      "cancelled": "Cancelled",
+      "dependency_failure": "Bad hash"
+    }
   }
 }

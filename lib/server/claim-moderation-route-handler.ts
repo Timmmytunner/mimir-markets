@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createApiError } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 import {
   getGlobalCooldownMs,
   hashModerationInput,
@@ -71,10 +71,8 @@ export async function handleClaimModerationPost(args: {
   moderateClaim: (input: { input: ClaimModerationInput; locale: string }) => Promise<ClaimModerationResult>;
 }) {
   if (process.env.NEXT_PUBLIC_FEATURE_CLAIM_MODERATION !== "1") {
-    return NextResponse.json(
-      createApiError("feature_disabled", "Claim moderation is not enabled"),
-      { status: 404 }
-    );
+    const err = apiError("not_found", "Claim moderation is not enabled");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 
   try {
@@ -83,27 +81,15 @@ export async function handleClaimModerationPost(args: {
     const input = parseInput(body.input);
 
     if (!input) {
-      return NextResponse.json(
-        createApiError("invalid_request", "input is required"),
-        { status: 400 }
-      );
+      const err = apiError("invalid_request", "input is required", { field: "input" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const cooldownMs = getGlobalCooldownMs();
     if (cooldownMs > 0) {
       const seconds = Math.max(1, Math.ceil(cooldownMs / 1000));
-      return NextResponse.json(
-        createApiError(
-          "claim_moderation_rate_limited",
-          `Moderation is rate-limited. Retry in ${seconds}s.`
-        ),
-        {
-          status: 429,
-          headers: {
-            "Retry-After": String(seconds),
-          },
-        }
-      );
+      const err = apiError("rate_limited", `Moderation is rate-limited. Retry in ${seconds}s.`, { retryAfterSeconds: seconds });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const key = hashModerationInput({ locale, input });
@@ -155,20 +141,19 @@ export async function handleClaimModerationPost(args: {
     if (isRateLimited) {
       setGlobalCooldownMs(35_000);
     }
-    const status = /not configured|not enabled/i.test(message)
-      ? 503
-      : isRateLimited
-        ? 429
-        : 500;
+    
+    let code: "upstream_unavailable" | "rate_limited" | "internal_error" = "internal_error";
+    let retryAfterSeconds: number | undefined;
 
-    const headers: Record<string, string> = {};
-    if (isRateLimited) {
-      headers["Retry-After"] = "35";
+    if (/not configured|not enabled/i.test(message)) {
+      code = "upstream_unavailable";
+    } else if (isRateLimited) {
+      code = "rate_limited";
+      retryAfterSeconds = 35;
     }
-    return NextResponse.json(createApiError("claim_moderation_error", message), {
-      status,
-      headers,
-    });
+
+    const err = apiError(code, message, { retryAfterSeconds });
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }
 

@@ -19,6 +19,7 @@ export type ApiErrorCode =
   | "invalid_request"
   | "invalid_signature"
   | "unsupported_version"
+  | "payload_too_large"
   | "idempotency_conflict"
   // ── 401/403: identity and permission ──
   | "unauthenticated"
@@ -52,6 +53,8 @@ const SPECS: Record<ApiErrorCode, ErrorSpec> = {
   invalid_request: { status: 400, retryable: false },
   invalid_signature: { status: 400, retryable: false },
   unsupported_version: { status: 400, retryable: false },
+  // Oversized signed payloads are not transient — shrink the body and resend.
+  payload_too_large: { status: 413, retryable: false },
   // The same idempotency key arrived with a DIFFERENT body: retrying cannot fix
   // it, the caller must either reuse the original body or pick a new key.
   idempotency_conflict: { status: 409, retryable: false },

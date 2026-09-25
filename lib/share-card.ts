@@ -11,10 +11,17 @@
  *  2. **The invite key is never in the URL, the image, or a cache key.** Share
  *     cards are cached by URL at the CDN; a key in the URL would be cached and
  *     logged by every hop.
- *  3. Long claims are truncated on a word boundary so the card never overflows,
+ *  3. **A wallet address is never printed whole, and the zero-address sentinel
+ *     never reaches the card.** A public card is scraped and cached by
+ *     strangers, so a full address would tie a wallet to a market on a permanent
+ *     public image. Addresses are shortened like everywhere else in the UI, and
+ *     `ZERO_ADDRESS` (written for a claim with no challenger) falls back to a
+ *     role label instead of printing as `0x0000…`.
+ *  4. Long claims are truncated on a word boundary so the card never overflows,
  *     and the truncation is visible rather than silent.
  */
 
+import { shortenAddress, ZERO_ADDRESS } from "./constants";
 import type { CanonicalMode, SettlementMode } from "./market-modes";
 import { SETTLEMENT_MODE_POLICY } from "./market-modes";
 
@@ -139,6 +146,43 @@ const CARD_COPY = {
   },
 } as const;
 
+/** Stellar strkeys are 56 base32 chars: `G…` for accounts, `C…` for contracts. */
+const STELLAR_STRKEY = /^[GC][A-Z2-7]{55}$/;
+/** A 20-byte EVM address in hex. */
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * True when a value names no participant at all: empty, the off-chain
+ * `ZERO_ADDRESS` sentinel, or an all-zero address. `decodeClaim` writes
+ * `ZERO_ADDRESS` when a claim has no challenger yet, so treating it as present
+ * would print a literal zero address where a role label belongs.
+ */
+export function isAbsentIdentity(value: string | null | undefined): boolean {
+  const clean = value?.trim() ?? "";
+  return clean === "" || clean === ZERO_ADDRESS || /^0x0+$/i.test(clean);
+}
+
+/** True for a full wallet address, as opposed to a human display name. */
+export function isWalletAddress(value: string): boolean {
+  const clean = value.trim();
+  return STELLAR_STRKEY.test(clean) || EVM_ADDRESS.test(clean);
+}
+
+/**
+ * Resolve a participant label for a PUBLIC card.
+ *
+ * A wallet address is shortened rather than printed whole: the repo shortens
+ * addresses everywhere else in the UI (`shortenAddress`), and a card is scraped
+ * and cached by strangers, so the full address would tie a wallet to a market on
+ * a permanent public image. A missing or zero address falls back to the role
+ * label, never to the sentinel itself.
+ */
+export function resolveIdentity(value: string | null | undefined, fallback: string): string {
+  const clean = value?.trim() ?? "";
+  if (isAbsentIdentity(clean)) return fallback;
+  return isWalletAddress(clean) ? shortenAddress(clean) : clean;
+}
+
 function avatarFallback(identity: string): string {
   const clean = identity.trim();
   if (!clean) return "?";
@@ -238,21 +282,24 @@ export function buildShareCard(input: ShareCardInput, size: CardSize = "og"): Sh
     };
   }
 
+  // Identities go through one resolver so a wallet address is never printed
+  // whole and the zero-address sentinel never reaches the card.
+  const actorA = resolveIdentity(input.creatorIdentity, copy.creator);
+  const actorB = resolveIdentity(
+    input.challengerIdentity,
+    input.mode.settlementMode === "duel" ? copy.rival : copy.challengers,
+  );
+
   return {
     kind: cardKind(input),
     size: dimensions,
     title: truncateOnWord(input.question, MAX_CLAIM_CHARS),
     sideA: truncateOnWord(input.creatorPosition, MAX_SIDE_CHARS),
     sideB: truncateOnWord(input.counterPosition, MAX_SIDE_CHARS),
-    actorA: input.creatorIdentity?.trim() || copy.creator,
-    actorB:
-      input.challengerIdentity?.trim() ||
-      (input.mode.settlementMode === "duel" ? copy.rival : copy.challengers),
-    avatarFallbackA: avatarFallback(input.creatorIdentity?.trim() || copy.creator),
-    avatarFallbackB: avatarFallback(
-      input.challengerIdentity?.trim() ||
-        (input.mode.settlementMode === "duel" ? copy.rival : copy.challengers),
-    ),
+    actorA,
+    actorB,
+    avatarFallbackA: avatarFallback(actorA),
+    avatarFallbackB: avatarFallback(actorB),
     sourceDomain: shareCardDomain(input.resolutionUrl),
     potLabel: `${formatPot(input.totalPot)} USDC`,
     modeLabel: policy?.label ?? "",

@@ -12,7 +12,11 @@
  * Unpaid → PAYMENT-REQUIRED 402. Signed retry → the verdict.
  */
 
-import { sha256Hex } from "@/lib/content-hash";
+import {
+  EVIDENCE_COMMITMENT_VERSION,
+  evidenceCommitmentHash,
+  type CommittedFetcherKind,
+} from "@/lib/evidence-commitment";
 import { NextResponse, type NextRequest } from "next/server";
 import { paidRoute } from "@/lib/x402/server";
 import { PRICES } from "@/lib/x402/config";
@@ -50,13 +54,18 @@ async function handler(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "evidenceUrl must be http(s)" }, { status: 400 });
   }
 
-  // Fetch evidence + judge. Same evidence-hash discipline as on-chain settle.
+  // Fetch evidence + judge. Same canonical evidence-hash discipline as on-chain
+  // settle, so a caller can verify the digest the same way.
   let evidenceText = "(no evidence)";
-  let fetcher = "none";
+  let fetcher: CommittedFetcherKind = "none";
+  let sourceUrl: string | undefined;
+  let fetchedAt: number | undefined;
   try {
     const snap = await fetchEvidence(evidenceUrl, { maxChars: MAX_EVIDENCE_CHARS, userAgent: "Mimir-OracleAPI/1.0" });
     evidenceText = snap.text;
     fetcher = snap.fetcher;
+    sourceUrl = snap.sourceUrl;
+    fetchedAt = snap.fetchedAt;
   } catch {
     /* fall through with placeholder; LLM will likely return UNRESOLVABLE */
   }
@@ -95,11 +104,24 @@ Return JSON only:
     /* keep defaults */
   }
 
+  // Canonical, versioned commitment over the evidence bytes (length-framed, so an
+  // attacker-controlled page cannot forge a boundary). No prompt, wallet or
+  // analytics field enters the digest. A malformed snapshot throws and surfaces
+  // as a 500 rather than returning an unverifiable hash.
+  const evidenceHash = evidenceCommitmentHash({
+    evidence:  evidenceText,
+    fetcher,
+    sourceUrl,
+    fetchedAt,
+    now:       Date.now(),
+  });
+
   return NextResponse.json({
     verdict,
     confidence,
     explanation,
-    evidenceHash: sha256Hex(evidenceText),
+    evidenceHash,
+    evidenceCommitmentVersion: EVIDENCE_COMMITMENT_VERSION,
     evidenceFetcher: fetcher,
     price: PRICES.oracle,
   });

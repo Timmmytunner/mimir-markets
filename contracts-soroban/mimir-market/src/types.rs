@@ -66,6 +66,70 @@ pub enum WinnerSide {
     Unresolvable = 4,
 }
 
+// ── Versioned verdict encoding ────────────────────────────────────────────────
+
+/// Current version of the on-chain verdict encoding.
+///
+/// The tag is stored alongside every verdict written by `resolve_claim` so an
+/// indexer, worker, or future contract version can tell WHICH encoding produced
+/// a stored decision instead of guessing from the shape of the value. Bump this
+/// only together with an explicit decode path for the older versions.
+pub const VERDICT_VERSION_V1: u32 = 1;
+
+/// An oracle verdict carrying its own encoding version.
+///
+/// `version` is an explicit discriminant, not an inference: a reader that does
+/// not know a version must refuse the verdict rather than reinterpret its
+/// fields. `side` is the decision as encoded under that version. `None` is
+/// never a settled verdict, so it is rejected by [`Verdict::decode`] at both
+/// write and read time.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Verdict {
+    pub version: u32,
+    pub side: WinnerSide,
+}
+
+impl Verdict {
+    /// Encode a verdict at the current version. Used by the legacy
+    /// `resolve_claim` entry point, whose callers pass a bare `WinnerSide`.
+    pub fn current(side: WinnerSide) -> Self {
+        Verdict {
+            version: VERDICT_VERSION_V1,
+            side,
+        }
+    }
+
+    /// Validate the version tag and return the decoded side.
+    ///
+    /// Unknown versions are refused with [`Error::UnsupportedVerdictVersion`]
+    /// so a verdict written by a newer encoding can never be silently read as
+    /// version 1. `None` is refused with [`Error::InvalidVerdict`].
+    pub fn decode(&self) -> Result<WinnerSide, Error> {
+        if self.version != VERDICT_VERSION_V1 {
+            return Err(Error::UnsupportedVerdictVersion);
+        }
+        match self.side {
+            WinnerSide::None => Err(Error::InvalidVerdict),
+            side => Ok(side),
+        }
+    }
+
+    /// Backward-compatible decode path for claims resolved before the version
+    /// tag existed. Those claims store only `Claim::winner_side`, which is by
+    /// construction a version-1 encoding, so it is promoted to an explicit
+    /// [`Verdict`] instead of being read as a bare enum forever.
+    pub fn from_unversioned(side: WinnerSide) -> Result<Self, Error> {
+        match side {
+            WinnerSide::None => Err(Error::ClaimNotResolved),
+            side => Ok(Verdict {
+                version: VERDICT_VERSION_V1,
+                side,
+            }),
+        }
+    }
+}
+
 // ── Fee policy ───────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -205,6 +269,23 @@ pub struct PayoutQuote {
     pub claimed: bool,
 }
 
+/// A paginated window into a claim's challenger roster.
+///
+/// `items` holds up to `limit` entries starting at `offset`.  
+/// `total` is the total roster length so callers can tell when they have read
+/// the last page without fetching an extra empty one.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChallengerPage {
+    /// The slice of challengers for this page.
+    pub items: soroban_sdk::Vec<Challenger>,
+    /// Roster position of the first item returned (mirrors the caller's
+    /// `offset` argument for safe cursor book-keeping).
+    pub offset: u32,
+    /// Total number of challengers in this claim (not just this page).
+    pub total: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlatformStats {
@@ -257,4 +338,17 @@ pub enum Error {
     AlreadyClaimedPayout = 34,
     ChallengersDidNotWin = 35,
     UnsupportedDecimals = 36,
+    InvalidConfidence = 37,
+    /// `cancel_claim` refused because the claim still holds counterparty funds
+    /// or a reserved creator liability: challengers have funded this market, so
+    /// it belongs to settlement, not to a creator refund.
+    ClaimHasActiveClaims = 38,
+    /// Escrow could not back the cancellation refund at the moment of the call.
+    /// The refund is never minted; the claim stays untouched and the creator
+    /// can retry once the contract is solvent again.
+    RefundNotEscrowed = 39,
+    /// A verdict carried an encoding version this contract cannot decode. The
+    /// verdict is refused rather than reinterpreted, so resolution fails closed
+    /// and the claim is left untouched.
+    UnsupportedVerdictVersion = 40,
 }

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "funded-market-v1",
+  "network": "stellar:testnet",
+  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+  "deployLedger": 1000,
+  "capturedThroughLedger": 1005,
+  "events": [
+    { "name": "ClaimCreated", "claimId": 1, "creator": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "category": "crypto", "ledger": 1000, "eventIndex": 0, "ledgerHash": "ledger-1000", "transactionHash": "tx-create-1" },
+    { "name": "ClaimChallenged", "claimId": 1, "challenger": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBWGI", "stakeAtomic": "25000000", "ledger": 1001, "eventIndex": 0, "ledgerHash": "ledger-1001", "transactionHash": "tx-challenge-1" },
+    { "name": "ClaimResolved", "claimId": 1, "winnerSide": 2, "confidence": 91, "evidenceHash": "sha256:fixture-evidence", "ledger": 1005, "eventIndex": 0, "ledgerHash": "ledger-1005", "transactionHash": "tx-resolve-1" }
+  ],
+  "reorgedOut": [],
+  "expectedFingerprint": "1|GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF|crypto|resolved|2|91|sha256:fixture-evidence|25000000|GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBWGI=25000000"
+}

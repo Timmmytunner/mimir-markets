@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 2,
+  "kind": "mimir-read-index-backup",
+  "hashAlgorithm": "sha256",
+  "createdAt": 1700000600000,
+  "source": {
+    "contractAddress": "CAQPTFHY5VXSWR3CNRGFVLGDNEH4NCOE2PCZL4QZ4JQMWVD54GRCMQPX",
+    "network": "stellar:testnet",
+    "appVersion": "0.1.0"
+  },
+  "checksum": "9dc34491ea02f30e3e2e934aef4e994ca29fad49f7b041f8aaf20bdbff06c72a",
+  "tables": {
+    "claims": [
+      {
+        "id": 101,
+        "creator": "GBO43ZBS4RBC2QFDKB23U6TBFEEK47ZLGSXDJSRV2H3PNQK5ZDEYXVLE",
+        "question": "Will the sun rise tomorrow?",
+        "creator_position": "Yes",
+        "counter_position": "No",
+        "resolution_url": "https://example.com/sunrise",
+        "creator_stake": 7,
+        "total_challenger_stake": 4,
+        "reserved_creator_liability": 2,
+        "deadline": 1800000000,
+        "state": "open",
+        "winner_side": "",
+        "resolution_summary": null,
+        "confidence": 0,
+        "category": "crypto",
+        "parent_id": 0,
+        "market_type": "binary",
+        "odds_mode": "pool",
+        "challenger_payout_bps": 0,
+        "handicap_line": null,
+        "settlement_rule": null,
+        "max_challengers": 5,
+        "visibility": "public",
+        "challenger_count": 1,
+        "total_pot": 11,
+        "first_challenger": "GD2SI5PUEFKC7TONNX7OR72WMYUO7WZDSCDSIVWWXPDIDYW5OP3ETM5D",
+        "first_indexed_at": 1700000000000,
+        "updated_at": 1700000000000,
+        "is_final": 0
+      },
+      {
+        "id": 202,
+        "creator": "GBO43ZBS4RBC2QFDKB23U6TBFEEK47ZLGSXDJSRV2H3PNQK5ZDEYXVLE",
+        "question": null,
+        "creator_position": null,
+        "counter_position": null,
+        "resolution_url": null,
+        "creator_stake": 10,
+        "total_challenger_stake": 0,
+        "reserved_creator_liability": 0,
+        "deadline": 1800003600,
+        "state": "active",
+        "winner_side": "",
+        "resolution_summary": null,
+        "confidence": 0,
+        "category": "custom",
+        "parent_id": 0,
+        "market_type": "binary",
+        "odds_mode": "fixed",
+        "challenger_payout_bps": 1500,
+        "handicap_line": null,
+        "settlement_rule": null,
+        "max_challengers": 1,
+        "visibility": "private",
+        "challenger_count": 0,
+        "total_pot": 10,
+        "first_challenger": "",
+        "first_indexed_at": 1700000001000,
+        "updated_at": 1700000001000,
+        "is_final": 0
+      }
+    ],
+    "challengers": [
+      {
+        "claim_id": 101,
+        "address": "GD2SI5PUEFKC7TONNX7OR72WMYUO7WZDSCDSIVWWXPDIDYW5OP3ETM5D",
+        "stake": 4,
+        "potential_payout": 6
+      }
+    ],
+    "sync_meta": [
+      {
+        "key": "last_claim_count",
+        "value": "2"
+      },
+      {
+        "key": "last_sync_at",
+        "value": "1700000000"
+      }
+    ],
+    "market_settlements": [
+      {
+        "claim_id": 202,
+        "gross_volume_atomic": "100000000",
+        "payout_atomic": "60000000",
+        "platform_fee_atomic": "1000000",
+        "agent_owner_fee_atomic": "500000",
+        "dust_atomic": "10",
+        "transaction_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "settled_at": 1700000100
+      }
+    ],
+    "fee_accruals": [
+      {
+        "accrual_id": "market:0",
+        "claim_id": 202,
+        "recipient": "GBO43ZBS4RBC2QFDKB23U6TBFEEK47ZLGSXDJSRV2H3PNQK5ZDEYXVLE",
+        "source": "platform",
+        "amount_atomic": "1000000",
+        "transaction_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "log_index": 0,
+        "accrued_at": 1700000100
+      }
+    ],
+    "fee_claims": [
+      {
+        "claim_event_id": "claim:1",
+        "recipient": "GBO43ZBS4RBC2QFDKB23U6TBFEEK47ZLGSXDJSRV2H3PNQK5ZDEYXVLE",
+        "amount_atomic": "500000",
+        "transaction_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "log_index": 1,
+        "claimed_at": 1700000400
+      }
+    ],
+    "fee_policies": [
+      {
+        "policy_id": "fee-policy-v2",
+        "platform_fee_bps": 2000,
+        "agent_owner_fee_bps": 500,
+        "platform_recipient": "GBO43ZBS4RBC2QFDKB23U6TBFEEK47ZLGSXDJSRV2H3PNQK5ZDEYXVLE",
+        "effective_at": 1600000000,
+        "transaction_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "log_index": 0
+      }
+    ],
+    "agent_revenue_attribution": [
+      {
+        "claim_id": 202,
+        "agent_id": "oracle",
+        "owner_fee_recipient": "GBO43ZBS4RBC2QFDKB23U6TBFEEK47ZLGSXDJSRV2H3PNQK5ZDEYXVLE",
+        "transaction_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "log_index": 0,
+        "attributed_at": 1700000100
+      }
+    ]
+  }
+}

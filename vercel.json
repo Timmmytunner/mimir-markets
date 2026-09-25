@@ -9,6 +9,12 @@
       "maxDuration": 30
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/nonce-prune",
+      "schedule": "*/20 * * * *"
+    }
+  ],
   "github": {
     "silent": true
   }

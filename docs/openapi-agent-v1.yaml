@@ -32,5 +32,8 @@ paths:
         "200": { description: Accepted or simulated action }
         "400": { description: Invalid envelope or schema validation failure }
         "401": { description: Invalid owner/operator signature }
+        "400": { description: Invalid envelope }
+        "401": { description: Invalid signature, expired/replayed envelope (code nonce_reused), or bad owner/operator proof }
         "403": { description: Capability, authority or budget policy rejected }
         "409": { description: Nonce replay or registration conflict }
+        "409": { description: Registration conflict }

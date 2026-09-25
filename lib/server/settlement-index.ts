@@ -363,6 +363,12 @@ export async function reconcileSettlements(): Promise<SettlementSyncResult> {
   const reached = decoded.reduce((max, event) => Math.max(max, event.ledger), fromLedger);
   const nextCursor = scan.truncated ? reached : Math.max(reached, scan.latestLedger);
   if (nextCursor > fromLedger) await setSyncMeta(CURSOR_KEY, String(nextCursor));
+  // Freshness for read-only portfolio performance. Advance it only when this pass
+  // reached the RPC head. A truncated or failed pass leaves the previous value
+  // intact so consumers cannot mistake a partial settlement projection for live data.
+  if (!scan.truncated) {
+    await setSyncMeta("settlement_last_sync_at", String(Date.now()));
+  }
 
   return result;
 }

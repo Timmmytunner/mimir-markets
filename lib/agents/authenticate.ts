@@ -27,9 +27,13 @@ import type { AgentApiAction } from "./api";
  *
  * A key must not be able to mint another key or widen its own budget — that would
  * turn one leaked credential into permanent, self-renewing access.
+ *
+ * `rotateKey` is included for the same reason as `issueKey`: issuing a new key
+ * and scheduling an expiry on the old one is a privileged authority action that
+ * must be initiated by the owner, not by whatever credential is being replaced.
  */
 export const OWNER_SIGNED_ACTIONS: readonly AgentApiAction[] = [
-  "register", "revoke", "issueKey", "revokeKey", "grantSpend", "revokeSpend",
+  "register", "revoke", "issueKey", "revokeKey", "rotateKey", "grantSpend", "revokeSpend",
 ];
 
 export function requiresOwnerSignature(action: AgentApiAction): boolean {
@@ -70,12 +74,16 @@ export async function authenticateAgentRequest(args: {
   }
 
   const record = await getAgentApiKeyByHash(hashApiKey(presented)).catch(() => null);
-  const checked = checkApiKeyRecord(record);
+  const checked = checkApiKeyRecord(record, Date.now());
   if (!checked.ok) {
     return {
       error: apiError(
         "unauthenticated",
-        checked.reason === "revoked" ? "API key revoked" : "unknown API key",
+        checked.reason === "revoked"
+          ? "API key revoked"
+          : checked.reason === "expired"
+            ? "API key expired"
+            : "unknown API key",
       ),
     };
   }

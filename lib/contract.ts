@@ -58,6 +58,7 @@ import { normalizeCategoryId, ZERO_ADDRESS } from "./constants";
 import { guardChallenge, toCanonicalMode } from "./market-modes";
 import { checkWriteAllowed } from "./ops/flags";
 import { availableCreatorLiquidityUnits } from "./payout";
+import { decodeHash32Hex } from "./content-hash";
 import type { VSCacheFreshness } from "./vs-freshness";
 
 export type { StellarSigner } from "./stellar";
@@ -439,11 +440,8 @@ function toHex(bytes: Buffer | Uint8Array | undefined | null): string | undefine
   return /^0+$/.test(hex) ? undefined : hex;
 }
 
-function fromHex32(hex: string | undefined | null): Buffer {
-  if (!hex) return ZERO_HASH32;
-  const normalized = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) return ZERO_HASH32;
-  return Buffer.from(normalized, "hex");
+function fromHex32(hex: string | undefined | null, field = "hash"): Buffer {
+  return hex ? decodeHash32Hex(hex, field) : ZERO_HASH32;
 }
 
 /**
@@ -1009,7 +1007,7 @@ export async function resolveClaim(
       winner_side: toWinnerSide(verdict.winner_side),
       summary: verdict.summary,
       confidence: verdict.confidence,
-      evidence_hash: fromHex32(verdict.evidence_hash),
+      evidence_hash: fromHex32(verdict.evidence_hash, "evidence_hash"),
     }),
   );
   return { ...write, claimId };
@@ -1385,7 +1383,7 @@ function buildCreateParams(p: CreateClaimParams): MimirMarket.CreateParams {
     // `Option<String>`: an empty invite key is `None`, not `Some("")`. Passing an
     // empty string would hash to a real key hash and lock the market to it.
     invite_key:            p.invite_key ? p.invite_key : undefined,
-    context_hash:          fromHex32(p.context_hash),
+    context_hash:          fromHex32(p.context_hash, "context_hash"),
     agent_owner_recipient: p.agent_owner_recipient ?? undefined,
   };
 }

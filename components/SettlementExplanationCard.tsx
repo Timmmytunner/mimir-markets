@@ -2,12 +2,14 @@
 
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { ExternalLink, FileCheck2, ShieldCheck, Scale, ScrollText } from "lucide-react";
+import { ShieldCheck, Scale, ScrollText } from "lucide-react";
 
 import { GlassCard } from "@/components/ui";
 import { formatDeadline, normalizeResolutionSource } from "@/lib/constants";
 import { computeClaimQuality } from "@/lib/claimQuality";
 import type { VSData } from "@/lib/contract";
+import SettlementReceipt from "@/components/SettlementReceipt";
+import ResearchSourceCitations from "@/components/research/ResearchSourceCitations";
 
 type SettlementExplanationCardProps = {
   vs: VSData;
@@ -82,6 +84,7 @@ export default function SettlementExplanationCard({
 
   const summary = vs.resolution_summary?.trim() || t("noSummary");
   const settlementRule = vs.settlement_rule?.trim() || t("ruleFallback");
+  const deadlineLabel = formatDeadline(vs.deadline ?? 0, locale === "en" ? "en" : "es");
 
   return (
     <GlassCard
@@ -153,6 +156,20 @@ export default function SettlementExplanationCard({
                   {t("ruleApplied")}
                 </div>
                 <p className="text-sm leading-relaxed text-pv-text/90">{settlementRule}</p>
+                {deadlineLabel ? (
+                  <p className="mt-2 text-xs leading-relaxed text-pv-muted">
+                    <span className="font-bold uppercase tracking-[0.12em] text-pv-muted/80">
+                      {t("receiptDeadline")}
+                    </span>
+                    {": "}
+                    <time
+                      dateTime={new Date((vs.deadline ?? 0) * 1000).toISOString()}
+                      className="font-mono tabular-nums text-pv-text/80"
+                    >
+                      {deadlineLabel}
+                    </time>
+                  </p>
+                ) : null}
                 <p className="mt-2 text-xs leading-relaxed text-pv-muted">
                   {t("consensusHint")}
                 </p>
@@ -160,27 +177,20 @@ export default function SettlementExplanationCard({
             </div>
 
             <div className="space-y-4">
-              <div className="rounded-xl border border-pv-ink/[0.08] bg-pv-bg/40 p-4">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-pv-fuch/80">
-                  <FileCheck2 size={14} />
-                  {t("evidence")}
-                </div>
-                <div className="text-sm font-semibold text-pv-text">{sourceHost}</div>
-                <p className="mt-2 text-xs leading-relaxed text-pv-muted">
-                  {t("evidenceHint")}
-                </p>
-                {normalizedSource ? (
-                  <a
-                    href={normalizedSource}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-3 inline-flex items-center gap-1.5 text-xs text-pv-cyan hover:text-pv-text transition-colors"
-                  >
-                    <ExternalLink size={12} />
-                    {t("openSource")}
-                  </a>
-                ) : null}
-              </div>
+              <ResearchSourceCitations
+                sources={[
+                  {
+                    url: vs.resolution_url,
+                    domain: sourceHost === t("unknownSource") ? undefined : sourceHost,
+                    trustTier: "primary",
+                    contentHash: (vs as { evidence_hash?: string }).evidence_hash,
+                    excerpt: vs.resolution_summary,
+                  },
+                ]}
+                deadlineUnix={typeof vs.deadline === "number" ? vs.deadline : null}
+                cancelled={vs.state === "cancelled"}
+                title={t("evidence")}
+              />
 
               <div className="rounded-xl border border-pv-ink/[0.08] bg-pv-bg/40 p-4">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-pv-gold/80">
@@ -231,7 +241,7 @@ export default function SettlementExplanationCard({
             </div>
           </div>
 
-          {/* SETTLEMENT RECEIPT removed by design request */}
+          <SettlementReceipt vs={vs} />
         </div>
       </div>
     </GlassCard>

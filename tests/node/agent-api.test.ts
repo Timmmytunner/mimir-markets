@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentRequestMessage, validateAgentRequestEnvelope, type SignedAgentRequest } from "../../lib/agents/api";
+import {
+  agentRequestMessage,
+  validateAgentRequestEnvelope,
+  signedRequestPayloadBytes,
+  MAX_SIGNED_REQUEST_PAYLOAD_BYTES,
+  type SignedAgentRequest,
+} from "../../lib/agents/api";
 
 const NOW = 1_780_000_000_000;
 function request(overrides: Partial<SignedAgentRequest> = {}): SignedAgentRequest {
@@ -35,4 +41,28 @@ test("request envelope is versioned, timestamped and nonce/idempotency bound", (
 test("the signature message binds action and idempotency key", () => {
   assert.notEqual(agentRequestMessage(request()), agentRequestMessage(request({ action: "stake" })));
   assert.notEqual(agentRequestMessage(request()), agentRequestMessage(request({ idempotencyKey: "heartbeat-2" })));
+});
+
+
+test("signed request body within the payload cap is accepted", () => {
+  const body = { note: "x".repeat(1024) };
+  assert.ok(signedRequestPayloadBytes(body) <= MAX_SIGNED_REQUEST_PAYLOAD_BYTES);
+  assert.deepEqual(validateAgentRequestEnvelope(request({ body }), NOW), []);
+});
+
+test("signed request body over the payload cap is rejected", () => {
+  const body = { note: "x".repeat(MAX_SIGNED_REQUEST_PAYLOAD_BYTES) };
+  assert.ok(signedRequestPayloadBytes(body) > MAX_SIGNED_REQUEST_PAYLOAD_BYTES);
+  assert.match(
+    validateAgentRequestEnvelope(request({ body }), NOW).join(" "),
+    /payload exceeds/,
+  );
+});
+
+test("payload cap applies on the API-key path too", () => {
+  const body = { note: "y".repeat(MAX_SIGNED_REQUEST_PAYLOAD_BYTES) };
+  assert.match(
+    validateAgentRequestEnvelope(request({ body }), NOW, { requireSignature: false }).join(" "),
+    /payload exceeds/,
+  );
 });

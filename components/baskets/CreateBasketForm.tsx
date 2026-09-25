@@ -7,6 +7,10 @@
  * storage unit, not something to make a person type. The remaining allowance is
  * shown live, because "weights_must_total_10000_bps" after a submit is a puzzle.
  *
+ * Exposure (track / mode / agent concentration) is previewed against the same
+ * DEFAULT_BASKET_POLICY the create API enforces, so a category breach is visible
+ * before the wallet signature prompt.
+ *
  * Signed by the creator: a basket earns its composer a fee, so who made it has to
  * be proven rather than claimed.
  */
@@ -14,6 +18,11 @@
 import { useMemo, useState } from "react";
 
 import { AgentAvatar } from "@/components/agents/AgentAvatar";
+import {
+  DEFAULT_BASKET_POLICY,
+  previewBasketExposureBeforeCreate,
+  type BasketAgentWeight,
+} from "@/lib/baskets";
 import { FEE_SCHEDULE } from "@/lib/fees";
 import { useWallet } from "@/lib/wallet";
 
@@ -23,6 +32,13 @@ export interface PickableAgent {
   address: string;
   track: string;
 }
+
+const POLICY_ERROR_COPY: Record<string, string> = {
+  weights_must_total_10000_bps: "Weights must total 100%.",
+  duplicate_agent: "Each agent may appear only once.",
+  single_agent_exposure: `No single agent may exceed ${DEFAULT_BASKET_POLICY.maxSingleAgentBps / 100}%.`,
+  category_exposure: `No single track may exceed ${DEFAULT_BASKET_POLICY.maxCategoryBps / 100}%.`,
+};
 
 /**
  * Mirrors the server's message exactly; a mismatch reads as a rejected signature.
@@ -42,6 +58,57 @@ function basketMessage(args: {
   ].join("\n");
 }
 
+function formatBps(bps: number): string {
+  return `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%`;
+}
+
+function ExposureBars({
+  title,
+  bars,
+  capLabel,
+}: {
+  title: string;
+  bars: Array<{ key: string; bps: number; overLimit: boolean }>;
+  capLabel?: string;
+}) {
+  if (bars.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <h4 className="font-mono text-[10px] uppercase tracking-wider text-pv-muted">{title}</h4>
+        {capLabel && (
+          <span className="font-mono text-[9px] uppercase tracking-wider text-pv-muted/80">{capLabel}</span>
+        )}
+      </div>
+      <ul className="space-y-1.5" role="list">
+        {bars.map((bar) => (
+          <li key={bar.key} className="space-y-0.5">
+            <div className="flex items-center justify-between gap-2 text-[12px]">
+              <span className={`truncate ${bar.overLimit ? "text-pv-danger" : "text-pv-text"}`}>
+                {bar.key}
+              </span>
+              <span className={`shrink-0 font-mono tabular-nums ${bar.overLimit ? "text-pv-danger" : "text-pv-muted"}`}>
+                {formatBps(bar.bps)}
+                {bar.overLimit ? " over cap" : ""}
+              </span>
+            </div>
+            <div
+              className="h-1.5 overflow-hidden bg-pv-ink/[0.08]"
+              role="presentation"
+              aria-hidden="true"
+            >
+              <div
+                className={`h-full transition-[width] ${bar.overLimit ? "bg-pv-danger/80" : "bg-pv-emerald/70"}`}
+                style={{ width: `${Math.min(100, bar.bps / 100)}%` }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function CreateBasketForm({ agents }: { agents: PickableAgent[] }) {
   const { address, isConnected, connect, signMessage, canSignMessages } = useWallet();
 
@@ -58,8 +125,27 @@ export function CreateBasketForm({ agents }: { agents: PickableAgent[] }) {
     [weights],
   );
   const total = chosen.reduce((sum, [, percent]) => sum + percent, 0);
-  // The policy caps a single agent at 40%; showing it here beats a server refusal.
-  const overweight = chosen.filter(([, percent]) => percent > 40).map(([id]) => id);
+
+  const agentsById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents]);
+
+  const exposurePreview = useMemo(() => {
+    const items: BasketAgentWeight[] = [];
+    for (const [id, percent] of chosen) {
+      const agent = agentsById.get(id);
+      // Unknown ids are dropped here; the API rejects them on submit either way.
+      if (!agent) continue;
+      items.push({
+        agentId: id,
+        weightBps: percent * 100,
+        // Match POST /api/baskets: category = directory track, mode = pool.
+        category: agent.track,
+        mode: "pool",
+      });
+    }
+    return previewBasketExposureBeforeCreate(items, DEFAULT_BASKET_POLICY);
+  }, [chosen, agentsById]);
+
+  const policyBlocked = exposurePreview.status === "invalid";
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -88,6 +174,10 @@ export function CreateBasketForm({ agents }: { agents: PickableAgent[] }) {
       setError(
         "This wallet cannot sign off-chain messages. Reconnect with Freighter, xBull or Hana to compose a basket.",
       );
+      return;
+    }
+    if (exposurePreview.status !== "ready") {
+      setError("Fix exposure before creating — the preview uses the same policy as the create API.");
       return;
     }
     setBusy(true);
@@ -132,6 +222,15 @@ export function CreateBasketForm({ agents }: { agents: PickableAgent[] }) {
   }
 
   const field = "w-full border border-pv-ink/[0.14] bg-pv-surface2/60 px-3 py-2.5 text-sm text-pv-text outline-none transition-colors placeholder:text-pv-muted focus:border-pv-emerald/50";
+
+  const statusCopy =
+    exposurePreview.status === "ready"
+      ? "Within policy — ready to create."
+      : exposurePreview.status === "incomplete"
+        ? `Allocate ${formatBps(10_000 - exposurePreview.totalBps)} more to reach 100%.`
+        : exposurePreview.status === "invalid"
+          ? "Over policy — adjust weights before signing."
+          : "Pick agents to preview track and agent concentration.";
 
   return (
     <div className="space-y-5">
@@ -191,19 +290,69 @@ export function CreateBasketForm({ agents }: { agents: PickableAgent[] }) {
         </div>
       </div>
 
-      {overweight.length > 0 && (
-        <p className="text-[12px] text-pv-danger">
-          No single agent may exceed 40%: {overweight.join(", ")}
-        </p>
+      {exposurePreview.status !== "empty" && (
+        <section
+          aria-label="Basket exposure preview"
+          className={`space-y-3 border p-4 ${
+            policyBlocked
+              ? "border-pv-danger/40 bg-pv-danger/[0.05]"
+              : "border-pv-ink/[0.12] bg-pv-surface2/40"
+          }`}
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-mono text-[10px] uppercase tracking-wider text-pv-muted">
+              Exposure preview
+            </h3>
+            <p
+              className={`text-[12px] ${policyBlocked ? "text-pv-danger" : "text-pv-muted"}`}
+              role="status"
+              aria-live="polite"
+            >
+              {statusCopy}
+            </p>
+          </div>
+          <p className="text-[11px] leading-relaxed text-pv-muted">
+            Same caps the create API applies: agent ≤ {formatBps(DEFAULT_BASKET_POLICY.maxSingleAgentBps)},
+            {" "}track ≤ {formatBps(DEFAULT_BASKET_POLICY.maxCategoryBps)}. No funds move until you
+            sign; this is allocation only.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ExposureBars
+              title="By track"
+              bars={exposurePreview.categoryBars}
+              capLabel={`cap ${formatBps(DEFAULT_BASKET_POLICY.maxCategoryBps)}`}
+            />
+            <ExposureBars
+              title="By agent"
+              bars={exposurePreview.agentBars}
+              capLabel={`cap ${formatBps(DEFAULT_BASKET_POLICY.maxSingleAgentBps)}`}
+            />
+          </div>
+          {exposurePreview.modeBars.length > 0 && (
+            <ExposureBars title="By mode" bars={exposurePreview.modeBars} />
+          )}
+          {policyBlocked && exposurePreview.errors.length > 0 && (
+            <ul className="space-y-1 text-[12px] text-pv-danger" role="alert">
+              {exposurePreview.errors
+                .filter((code) => code !== "weights_must_total_10000_bps")
+                .map((code) => (
+                  <li key={code}>{POLICY_ERROR_COPY[code] ?? code}</li>
+                ))}
+            </ul>
+          )}
+        </section>
       )}
+
       {error && <p className="text-[12px] text-pv-danger">{error}</p>}
 
-      <button type="button" disabled={busy || total !== 100 || !name.trim() || overweight.length > 0}
+      <button type="button" disabled={busy || exposurePreview.status !== "ready" || !name.trim()}
         onClick={submit}
         className="btn-compact-primary w-full px-4 py-2.5 text-[13px] disabled:opacity-40">
         {!isConnected ? "Connect wallet to create"
           : busy ? "Waiting for signature…"
-          : total !== 100 ? `Allocate ${100 - total}% more`
+          : exposurePreview.status === "incomplete" ? `Allocate ${100 - total}% more`
+          : policyBlocked ? "Fix exposure to create"
+          : !name.trim() ? "Name the basket"
           : "Create basket"}
       </button>
     </div>

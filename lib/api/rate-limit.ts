@@ -50,9 +50,27 @@ export interface RateLimitDecision {
 interface Bucket {
   count: number;
   windowStartedAt: number;
+  windowMs: number;
 }
 
 const buckets = new Map<string, Bucket>();
+
+/**
+ * Upper bound on simultaneously-stored windows.
+ *
+ * Buckets are never deleted on expiry — a stale entry is only read as "fresh"
+ * again — so distinct keys (mainly IPs) accumulate for the life of the process.
+ * A long-lived worker or dev server would otherwise grow the map without bound.
+ * The cap is far above real traffic (every live allowance shares one window per
+ * key), and eviction only forgets the longest-idle bucket, whose caller just
+ * starts a fresh window — the same outcome expiring on its own would produce.
+ */
+export const MAX_BUCKETS = 10_000;
+
+/** Test and operational seam: inspect how many windows the guard currently holds. */
+export function bucketCount(): number {
+  return buckets.size;
+}
 
 /** Test seam and operational kill switch. */
 export function resetRateLimits(): void {
@@ -120,16 +138,40 @@ export function consume(
   for (const { rule, key } of applicable) {
     const bucket = buckets.get(key);
     if (!bucket || now - bucket.windowStartedAt >= rule.windowMs) {
-      buckets.set(key, { count: 1, windowStartedAt: now });
+      buckets.set(key, { count: 1, windowStartedAt: now, windowMs: rule.windowMs });
     } else {
       bucket.count += 1;
     }
   }
+  enforceBucketBound(now);
 
   return {
     allowed: true,
     remaining: tightestRemaining === Number.POSITIVE_INFINITY ? 0 : tightestRemaining,
   };
+}
+
+/**
+ * Keep the window map inside {@link MAX_BUCKETS}. Expired windows are dropped
+ * first (they are dead memory by definition); if the map is still over the cap,
+ * the longest-idle live bucket is forgotten — it resets just as its own window
+ * expiring would. Not run for refused requests: those are not committed to a
+ * bucket, so they cannot grow the map.
+ */
+function enforceBucketBound(now: number): void {
+  if (buckets.size <= MAX_BUCKETS) return;
+  for (const [key, bucket] of buckets) {
+    if (now - bucket.windowStartedAt >= bucket.windowMs) {
+      buckets.delete(key);
+      if (buckets.size <= MAX_BUCKETS) return;
+    }
+  }
+  while (buckets.size > MAX_BUCKETS) {
+    // Insertion-ordered: the first key is the oldest window.
+    const oldest = buckets.keys().next().value;
+    if (oldest === undefined) break;
+    buckets.delete(oldest);
+  }
 }
 
 /** Inspect without consuming, for a status endpoint. */

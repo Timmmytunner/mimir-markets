@@ -53,6 +53,11 @@ impl MimirSquad {
         pool::withdraw_before_deadline(&env, participant, market_id, side, amount)
     }
 
+    
+    pub fn transition_deadline(env: Env, market_id: u64) -> Result<(), Error> {
+        pool::transition_deadline(&env, market_id)
+    }
+
     pub fn resolve(env: Env, market_id: u64, result: u32) -> Result<(), Error> {
         pool::resolve(&env, market_id, result)
     }

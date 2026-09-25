@@ -25,9 +25,11 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { useWallet } from "@/lib/wallet";
 import { challengeClaim } from "@/lib/contract";
+import { evaluateUsdcTrustlineGate } from "@/lib/usdcTrustlineGate";
 import {
   UsdcTrustlineGate,
   useUsdcTrustline,
@@ -47,8 +49,17 @@ interface Mirror {
 }
 
 export function PendingMirrors() {
+  const t = useTranslations("wallet");
   const { address, isConnected, signer } = useWallet();
   const trustline = useUsdcTrustline();
+  const trustlineGate = evaluateUsdcTrustlineGate({
+    action: "mirror",
+    status: trustline.status,
+    loading: trustline.loading,
+    stale: trustline.stale,
+    isConnected,
+    hasSigner: Boolean(signer),
+  });
   const [mirrors, setMirrors] = useState<Mirror[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -74,7 +85,14 @@ export function PendingMirrors() {
   }, [load]);
 
   async function mirror(item: Mirror) {
-    if (!signer) return;
+    if (!isConnected || !address || !signer) {
+      setError(t(!isConnected || !address ? "connectWalletFirst" : "cannotSign"));
+      return;
+    }
+    if (!trustlineGate.allowed) {
+      setError(t(trustlineGate.messageKey));
+      return;
+    }
     setBusyId(item.claimId);
     setError(null);
     try {
@@ -100,7 +118,7 @@ export function PendingMirrors() {
   if (!isConnected) return null;
   if (!loading && mirrors.length === 0) return null;
 
-  const blocked = trustline.status === "missing" || trustline.status === "unfunded";
+  const blocked = !trustlineGate.allowed;
 
   return (
     <section className="border border-pv-emerald/35 bg-pv-emerald/[0.05] p-4">
@@ -114,7 +132,11 @@ export function PendingMirrors() {
         </p>
       </div>
 
-      <UsdcTrustlineGate trustline={trustline} className="mb-3" />
+      <UsdcTrustlineGate
+        trustline={trustline}
+        className="mb-3"
+        onReady={() => void load()}
+      />
 
       {loading && mirrors.length === 0 && (
         <p className="py-3 text-[12px] text-pv-muted">Checking…</p>

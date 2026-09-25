@@ -67,8 +67,12 @@ fn bps_of(amount: i128, bps: u32) -> Result<i128, Error> {
 /// Split a gross payout into fees and the amount owed.
 ///
 /// Fees apply to PROFIT only, so `owed` can never fall below `principal` for a
-/// winner. Integer division truncates, which rounds fees down in the
-/// participant's favour; the remainder stays in escrow as dust.
+/// winner. Each leg is `floor(profit * bps / BPS_DIVISOR)`, computed separately,
+/// so every leg rounds DOWN and two legs together never take more than one leg
+/// at their combined rate would. The fractional remainder stays with the
+/// participant (`owed = gross - fees_taken`), so fee rounding leaves nothing in
+/// escrow. Escrow dust comes only from pool-share truncation, and the last
+/// claimant absorbs it.
 ///
 /// Returns `(owed, fees_taken)` and accrues the fee balances as a side effect.
 pub fn apply_fees(

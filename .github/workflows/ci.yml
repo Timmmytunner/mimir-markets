@@ -37,5 +37,38 @@ jobs:
       - run: npm run test:contracts
       - run: cargo build --manifest-path contracts-soroban/Cargo.toml --release --target wasm32v1-none
       - run: npm run test:agent-api:drift
+      - run: npm run verify:artifacts -- --require-built
+      - run: npm run verify:cache-backup -- tests/fixtures/cache-backup/valid.json
       - run: npm run test:smoke
       - run: npm run build
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The smoke flow builds/serves the app with a strict secret-free env and
+    # drives a real browser against it (scripts/run-browser-smoke.mjs). It uses
+    # the runner's preinstalled Google Chrome (Playwright channel "chrome"); it
+    # never downloads a Playwright browser and never sees the repo's secrets.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check:terms
+      - run: npm run typecheck
+      - run: npm run test:smoke
+      - run: npm run smoke:browser
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-smoke-artifacts
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

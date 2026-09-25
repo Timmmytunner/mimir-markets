@@ -73,17 +73,71 @@ export interface AgentApiKeyRecord {
   label: string;
   createdAt: number;
   lastUsedAt?: number;
+  /**
+   * Unix milliseconds after which this key is no longer valid.
+   *
+   * Absent means the key never expires automatically (permanent). Set explicitly
+   * during key rotation so the old key continues to work through the overlap
+   * window, then silently stops authenticating once the window closes.
+   */
+  expiresAt?: number;
   revokedAt?: number;
   revokedReason?: string;
 }
 
-export type ApiKeyRejection = "not_found" | "revoked";
+export type ApiKeyRejection = "not_found" | "revoked" | "expired";
 
-/** Pure decision so the accept/reject rule is testable without a database. */
+/**
+ * Pure decision so the accept/reject rule is testable without a database.
+ *
+ * Order matters: revocation is always checked before expiry so that an owner who
+ * revokes during the overlap window gets an immediate stop ("revoked") rather than
+ * waiting for the window to close ("expired").
+ */
 export function checkApiKeyRecord(
   record: AgentApiKeyRecord | null,
+  now = Date.now(),
 ): { ok: true; record: AgentApiKeyRecord } | { ok: false; reason: ApiKeyRejection } {
   if (!record) return { ok: false, reason: "not_found" };
   if (record.revokedAt) return { ok: false, reason: "revoked" };
+  if (record.expiresAt !== undefined && record.expiresAt <= now) {
+    return { ok: false, reason: "expired" };
+  }
   return { ok: true, record };
+}
+
+/**
+ * Default overlap duration for key rotation: 24 hours in milliseconds.
+ *
+ * The outgoing key remains valid for this window so any service that has already
+ * loaded it can continue to run while the operator distributes the new one. After
+ * the window closes the old key silently stops authenticating.
+ */
+export const DEFAULT_ROTATION_OVERLAP_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Maximum allowed overlap duration: 30 days. Prevents accidentally immortal keys. */
+export const MAX_ROTATION_OVERLAP_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * Parse and validate an overlap duration from an owner-supplied value (milliseconds).
+ * Falls back to the default if absent. Returns an error string if the value is
+ * out of range.
+ */
+export function parseOverlapMs(
+  raw: unknown,
+): { ok: true; overlapMs: number } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, overlapMs: DEFAULT_ROTATION_OVERLAP_MS };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    return { ok: false, error: "overlap_ms must be a non-negative number" };
+  }
+  if (n > MAX_ROTATION_OVERLAP_MS) {
+    return {
+      ok: false,
+      error: `overlap_ms exceeds the maximum of ${MAX_ROTATION_OVERLAP_MS} ms (30 days)`,
+    };
+  }
+  return { ok: true, overlapMs: Math.floor(n) };
 }

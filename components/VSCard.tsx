@@ -77,8 +77,14 @@ export default function VSCard({
   const t = useTranslations("vsDetail");
   const tCat = useTranslations("categories");
 
+  const cardState = vs.state ?? "unknown";
+  const cardDisabled = cardState === "cancelled";
+
   return (
     <motion.div
+      data-market-card={String(vs.id)}
+      data-market-card-state={cardState}
+      data-market-card-disabled={cardDisabled ? "true" : undefined}
       whileHover={{ y: -2 }}
       transition={{ duration: 0.2 }}
       className={`group card card-hover relative p-5 ${
@@ -89,7 +95,8 @@ export default function VSCard({
     >
       <Link
         href={`/vs/${vs.id}`}
-        className="absolute inset-0 z-0 rounded"
+        data-market-card-focus
+        className="absolute inset-0 z-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pv-emerald/40 focus-visible:ring-offset-2 focus-visible:ring-offset-pv-surface"
         aria-label={vs.question}
       />
 

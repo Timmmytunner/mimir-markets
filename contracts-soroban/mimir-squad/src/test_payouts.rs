@@ -313,8 +313,7 @@ fn fees_accrue_across_markets_and_are_pulled_by_the_recipient_only() {
     assert_eq!(f.escrow_balance(), 0);
 
     // Nothing left to pull.
-    let err = f.client().try_claim_fees().unwrap_err().unwrap();
-    assert_eq!(err, Error::NoFees);
+    assert_eq!(f.client().claim_fees(), 0);
 }
 
 #[test]
@@ -332,8 +331,7 @@ fn a_zero_fee_market_accrues_nothing() {
     assert_eq!(f.client().claim(&a1, &id, &SIDE_A), 20 * USDC);
 
     assert_eq!(f.client().get_accrued_fees(), 0);
-    let err = f.client().try_claim_fees().unwrap_err().unwrap();
-    assert_eq!(err, Error::NoFees);
+    assert_eq!(f.client().claim_fees(), 0);
 }
 
 // ── Claim gating ─────────────────────────────────────────────────────────────
@@ -352,8 +350,7 @@ fn claiming_twice_is_rejected() {
 
     f.client().claim(&a1, &id, &SIDE_A);
     assert!(f.client().has_claimed(&id, &SIDE_A, &a1));
-    let err = f.client().try_claim(&a1, &id, &SIDE_A).unwrap_err().unwrap();
-    assert_eq!(err, Error::AlreadyClaimed);
+    assert_eq!(f.client().claim(&a1, &id, &SIDE_A), 0);
     // The double claim did not drain the escrow.
     assert_eq!(f.escrow_balance(), 0);
 }
@@ -574,4 +571,9 @@ fn preview_is_zero_for_non_winners_and_unresolved_markets() {
     // No position.
     let stranger = Address::generate(&f.env);
     assert_eq!(f.client().preview_claim(&id, &SIDE_A, &stranger).net, 0);
+}
+
+#[test]
+fn conservation_error_code_is_stable() {
+    assert_eq!(Error::ConservationViolation as u32, 26);
 }

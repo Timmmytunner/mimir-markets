@@ -160,15 +160,54 @@ export function shortenAddress(a: string, chars = 4): string {
   return `${a.slice(0, chars + 2)}...${a.slice(-chars)}`;
 }
 
-export function formatDeadline(ts: number, locale = "es"): string {
+/**
+ * Resolve the viewer's IANA timezone (browser / runtime). Falls back to UTC when
+ * Intl is unavailable so deadline labels stay defined in every environment.
+ */
+export function getUserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * Format an on-chain deadline (unix seconds) in the user's local timezone.
+ * Always includes a short timezone name so wall-clock times are unambiguous.
+ * Pass `timeZone` to pin a zone in tests; omit it to use the runtime locale zone.
+ */
+export function formatDeadline(
+  ts: number,
+  locale = "es",
+  timeZone?: string
+): string {
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return "";
+  }
   const loc = locale === "en" ? "en-US" : "es-AR";
-  return new Date(ts * 1000).toLocaleString(loc, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const tz = timeZone || getUserTimeZone();
+  try {
+    return new Date(ts * 1000).toLocaleString(loc, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: tz,
+      timeZoneName: "short",
+    });
+  } catch {
+    // Invalid IANA zone — still show a local wall clock without crashing.
+    return new Date(ts * 1000).toLocaleString(loc, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  }
 }
 
 export function getTimeRemaining(deadline: number, locale: "es" | "en" = "es") {

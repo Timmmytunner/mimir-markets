@@ -500,3 +500,64 @@ test("seeded fuzz conserves every atomic unit across 2,000 markets", () => {
     }
   }
 });
+
+// ── Parity with the contract's fee rounding (contracts-soroban fees.rs) ────────
+
+test("a fee leg with no recipient is not charged, matching the contract", () => {
+  // An unattributed market snapshots the policy's owner bps with no recipient.
+  // `quote_fees` charges nothing for that leg; the mirror must not either, or it
+  // quotes a winner less than the contract actually pays.
+  const args = {
+    principalUnits: U(10),
+    grossPayoutUnits: U(20),
+    outcome: "challengers_win" as const,
+  };
+  const unattributed = splitFees({
+    ...args,
+    snapshot: snapshot({ agentOwnerFeeBps: 100, agentOwnerRecipient: null }),
+  });
+  const noOwnerFee = splitFees({ ...args, snapshot: snapshot({ agentOwnerFeeBps: 0 }) });
+  assert.equal(unattributed.agentOwnerFeeUnits, 0n);
+  assert.equal(unattributed.payoutUnits, noOwnerFee.payoutUnits);
+
+  const settlement = settleMarket({
+    participants: goldenPool(),
+    snapshot: snapshot({ agentOwnerFeeBps: 100, agentOwnerRecipient: null }),
+    outcome: "challengers_win",
+  });
+  assert.equal(settlement.totalAgentOwnerFeeUnits, 0n);
+  assert.equal(conservationHolds(settlement), true);
+});
+
+test("fee legs round down exactly as the contract does", () => {
+  const both = snapshot({
+    platformFeeBps: 700,
+    agentOwnerFeeBps: 300,
+    agentOwnerRecipient: AGENT_OWNER,
+  });
+  const split = (profit: bigint) =>
+    splitFees({
+      principalUnits: U(2),
+      grossPayoutUnits: U(2) + profit,
+      snapshot: both,
+      outcome: "challengers_win",
+    });
+
+  // The shared vector from test_fee_rounding.rs: 2,013 stroops of profit at
+  // 7% + 3% is 140 + 60 = 200, where the exact fee is 201.3 and one 10% leg
+  // would take 201. The winner keeps the remainder.
+  const vector = split(2_013n);
+  assert.equal(vector.platformFeeUnits, 140n);
+  assert.equal(vector.agentOwnerFeeUnits, 60n);
+  assert.equal(vector.payoutUnits, U(2) + 2_013n - 200n);
+
+  // Every profit where truncation is proportionally largest.
+  for (let profit = 0n; profit <= 25_000n; profit += 1n) {
+    const { platformFeeUnits, agentOwnerFeeUnits, payoutUnits } = split(profit);
+    assert.equal(platformFeeUnits, (profit * 700n) / 10_000n);
+    assert.equal(agentOwnerFeeUnits, (profit * 300n) / 10_000n);
+    const fee = platformFeeUnits + agentOwnerFeeUnits;
+    assert.ok(fee * 10_000n <= profit * 1_000n, `profit ${profit}: fee above exact`);
+    assert.equal(payoutUnits, U(2) + profit - fee);
+  }
+});

@@ -488,6 +488,7 @@ function StakeHoldingVSRow({
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
+        timeZoneName: "short",
       }).format(createdAtDate)
     : "";
   const timeStamp = createdAtDate
@@ -495,10 +496,24 @@ function StakeHoldingVSRow({
         hour: "2-digit",
         minute: "2-digit",
         hourCycle: "h23",
+        timeZoneName: "short",
+      }).format(createdAtDate)
+    : "";
+  // Prefer a single local-timezone stamp (date + time + short TZ) when both
+  // formatters overlap on the zone name; fall back to concatenated parts.
+  const localDeadlineStamp = createdAtDate
+    ? new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+        timeZoneName: "short",
       }).format(createdAtDate)
     : "";
   const metaLine = createdAtDate
-    ? `${tCat(vs.category as never)} — ${dateStamp} ${timeStamp}`
+    ? `${tCat(vs.category as never)} — ${localDeadlineStamp || `${dateStamp} ${timeStamp}`}`
     : tCat(vs.category as never);
 
   const participantCount = 1 + getVSChallengerCount(vs);

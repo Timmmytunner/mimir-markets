@@ -152,7 +152,9 @@ export function project(
       if (!claims.has(event.claimId)) {
         claims.set(event.claimId, {
           claimId: event.claimId,
-          creator: (event.creator ?? "").toLowerCase(),
+          // Stellar strkeys are case-sensitive. Preserve them byte-for-byte so a
+          // replay cannot manufacture an address that the chain does not know.
+          creator: event.creator ?? "",
           category: event.category ?? "custom",
           state: "open",
           challengers: [],
@@ -178,7 +180,7 @@ export function project(
 
     switch (event.name) {
       case "ClaimChallenged": {
-        const address = (event.challenger ?? "").toLowerCase();
+        const address = event.challenger ?? "";
         const stakeUnits = event.stakeUnits ?? 0n;
         // One address challenges at most once per claim on chain, so a repeat is
         // data corruption rather than a second position — keep the first.

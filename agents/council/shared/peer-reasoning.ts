@@ -67,7 +67,7 @@ export async function buyPeerReasoning(args: {
   const payer = payingWalletForPersona(args.buyer);
   if (!payer) return [];
 
-  const capUnits = usdcToUnits(args.capUsdc);
+  let remainingUnits = usdcToUnits(args.capUsdc);
   const sellers = selectPeerSellers(
     args.buyer,
     args.activePersonas,
@@ -77,13 +77,15 @@ export async function buyPeerReasoning(args: {
   const reads: PeerReasoningRead[] = [];
 
   for (const seller of sellers) {
+    if (remainingUnits <= 0n) break;
+
     const url =
       `${args.baseUrl.replace(/\/$/, "")}/api/council/reasoning` +
       `?claimId=${encodeURIComponent(String(args.claimId))}` +
       `&persona=${encodeURIComponent(seller.slug)}`;
 
     try {
-      const result = await fetchWithBudget(url, payer, capUnits, {
+      const result = await fetchWithBudget(url, payer, remainingUnits, {
         method: "GET",
         headers: { accept: "application/json" },
       });
@@ -99,6 +101,10 @@ export async function buyPeerReasoning(args: {
         reasoning: reasoning.slice(0, 360),
         pricePaidUnits: result.payment?.priceUnits?.toString() ?? null,
       });
+
+      if (result.payment) {
+        remainingUnits -= result.payment.priceUnits;
+      }
     } catch (err) {
       console.warn(
         `[council:${args.buyer.slug}] peer read failed from ${seller.slug}:`,

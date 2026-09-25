@@ -146,8 +146,35 @@ The mechanism lives in `agents/oracle/council-vote.ts` (pure scoring math is uni
 | Variable | Default | Effect |
 |---|---|---|
 | `COUNCIL_SELF_RESOLVING` | off | `1` enables the mechanism (requires `COUNCIL_SETTLEMENT=1`) |
+| `COUNCIL_QUORUM` | `3` | Min decisive votes before council settles; invalid values normalize to 3 (see `lib/council/quorum.ts`) |
 | `COUNCIL_ALPHA` | `0.25` | Per-vote stop probability after quorum |
-| `COUNCIL_BONUS_USDC` | `0.01` | Total cross-entropy bonus pool per settlement |
+| `COUNCIL_BONUS_USDC` | `0.01` | Total cross-entropy bonus pool per settlement; `0` pauses bonuses, maximum `1`, exact 7-decimal USDC |
+
+### Bonus payout safety and operations
+
+The oracle pays bonuses only after a fresh Soroban read confirms the claim is
+`resolved` with the expected outcome and evidence hash. A pending transaction,
+cancelled/stale claim, or unavailable RPC withholds bonuses without changing
+the market's funded settlement. Only jurors with a paid vote and a response
+wallet matching the worker's configured `COUNCIL_<SLUG>_PUBLIC` address qualify.
+The pool is split in atomic 7-decimal USDC; dust remains with the oracle.
+
+Bonus transfers are separate classic Stellar payments from the oracle wallet,
+not claims on the market escrow. The worker checks its USDC balance, then
+reserves each `(network, contract, claim, juror)` payout in Postgres before
+submitting. `DATABASE_URL` must be available for bonuses; a database failure
+withholds them but never rolls back the already-final market settlement. A
+duplicate reservation is skipped. A transfer or receipt-update failure leaves
+the row in `review` or `reserved`, **not** eligible for automatic retry: the
+operator must inspect the settlement hash, intended recipient/amount, and
+Horizon transaction history before reconciling it. Do not reset the row or
+replay a payment solely because no receipt was logged.
+
+For rollback, set `COUNCIL_BONUS_USDC=0` before deploying an older worker;
+otherwise an older build bypasses the reservation ledger and can double-pay.
+Keep the `council_bonus_payouts` table for audit and manual reconciliation.
+No schema migration or contract redeploy is needed for the funded market
+state; the new table is created by the existing database bootstrap.
 
 ---
 

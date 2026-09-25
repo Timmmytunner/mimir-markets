@@ -63,6 +63,26 @@ payouts + fees + dust equals escrow inflow. Alongside it:
 - `draw_refunds_everyone_in_full_with_no_fee` and the `Unresolvable` equivalent
 - `a_quote_matches_what_the_pull_actually_pays`
 
+### Fixed-odds liquidity is a claim-level accounting invariant
+
+A fixed-odds challenge reserves only the challenger's **profit**, because the
+challenger's principal is already held in escrow and is returned on every
+outcome. The contract computes the same integer profit as `gross_payout` at
+challenge time, rejects a challenge when it exceeds the creator's unreserved
+stake, and stores the cumulative reservation on the claim. A failed check runs
+before the token pull and leaves claim state, escrow, and participant balances
+unchanged. Exact-capacity and exhausted-capacity cases are covered by
+`fixed_odds_rejects_challenge_creator_cannot_cover`; corrupt reservations fail
+closed via `fixed_odds_rejects_corrupt_reserved_liability_without_underflowing`.
+
+At resolution, the reserved profit is paid to winning challengers, while the
+creator receives the unreserved remainder. The `FixedOddsLiquidityReserved`
+event records the post-challenge reservation and remaining liquidity, making the
+limit auditable from ledger events without trusting a read-index. The
+`checked_*` arithmetic used for inflow, committed payout, and claim counters
+also prevents malformed persisted state from wrapping into an apparently valid
+settlement.
+
 The off-chain mirror exports `conservationHolds` and `noWinnerLosesPrincipal` from
 `lib/fees.ts` and asserts them over the same shapes.
 
@@ -82,6 +102,32 @@ A payout the contract cannot deliver — a frozen or authorisation-revoked USDC
 trustline makes the Stellar Asset Contract transfer fail — is parked as a
 withdrawable balance rather than failing the whole settlement
 (`escrow::push_or_park`, tested by `a_blocked_challenger_has_their_payout_parked`).
+
+### Cancellation is guarded against active claims
+
+`cancel_claim` is the one lifecycle transition where the creator — not the oracle —
+moves money out of escrow, so its state check is backed by the claim's own
+accounting. A cancellation of an Open claim is refused with `ClaimHasActiveClaims`
+unless `challenger_count`, `total_challenger_stake` and
+`reserved_creator_liability` are all zero: any counterparty funding means the
+claim belongs to settlement, and a refund would strand those funds behind a
+terminal `Cancelled` state. This guards not only the normal Active state but the
+inconsistent ones a stale read-index, a lost worker update or an out-of-order
+transaction can present, and the contract re-derives the claim at execution time
+so a cancel prepared against a stale Open read cannot fire after a challenge has
+landed. A second guard (`RefundNotEscrowed`) refuses the refund when shared escrow
+cannot cover it at the moment of the call, so a cancellation can never pay the
+creator out of other claims' funds; both refusals emit `CancellationRefused` with
+the claim's accounting and change nothing. The refund itself stays fee-free,
+succeeds even when the creator's wallet cannot receive (parked for later pull,
+reported in the `ClaimCancelled` event's `parked` flag), and only ever removes
+that claim's own stake from escrow. Tested:
+`a_claim_with_funded_challengers_cannot_be_cancelled_even_if_open`,
+`a_single_atomic_unit_of_exposure_blocks_cancellation`,
+`cancellation_conserves_the_shared_escrow`,
+`a_cancellation_refund_is_parked_when_the_creator_cannot_receive`,
+`a_cancel_that_executes_after_a_challenge_is_refused`,
+`cancellation_error_codes_are_stable` (all in `src/test_lifecycle.rs`).
 
 ## mimir-squad
 

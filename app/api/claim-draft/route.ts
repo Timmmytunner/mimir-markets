@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { generateClaimDrafts } from "@/lib/server/source-claim-generator";
-import { createApiError } from "@/lib/server/api-validation";
+import { apiError } from "@/lib/api/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +12,8 @@ type ClaimDraftRequestBody = {
 
 export async function POST(request: Request) {
   if (process.env.NEXT_PUBLIC_FEATURE_SOURCE_DRAFTS !== "1") {
-    return NextResponse.json(
-      createApiError("feature_disabled", "Source drafting is not enabled"),
-      { status: 404 }
-    );
+    const err = apiError("not_found", "Source drafting is not enabled");
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 
   try {
@@ -24,29 +22,24 @@ export async function POST(request: Request) {
     const locale = typeof body.locale === "string" ? body.locale.trim() : "en";
 
     if (!url) {
-      return NextResponse.json(
-        createApiError("invalid_request", "url is required"),
-        { status: 400 }
-      );
+      const err = apiError("invalid_request", "url is required", { field: "url" });
+      return NextResponse.json(err.body, { status: err.status, headers: err.headers });
     }
 
     const result = await generateClaimDrafts({ sourceUrl: url, locale });
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to draft claim suggestions";
-    const status =
-      /not configured|not enabled/i.test(message)
-        ? 503
-        : /valid source URL|not supported|did not produce|readable text|Unable to fetch source|must be an HTML or text page/i.test(
-              message
-            )
-          ? 400
-          : 500;
+    
+    let code: "invalid_request" | "upstream_unavailable" | "internal_error" = "internal_error";
+    if (/not configured|not enabled/i.test(message)) {
+      code = "upstream_unavailable";
+    } else if (/valid source URL|not supported|did not produce|readable text|Unable to fetch source|must be an HTML or text page/i.test(message)) {
+      code = "invalid_request";
+    }
 
-    return NextResponse.json(
-      createApiError("claim_draft_error", message),
-      { status }
-    );
+    const err = apiError(code, message);
+    return NextResponse.json(err.body, { status: err.status, headers: err.headers });
   }
 }
 

@@ -14,8 +14,8 @@
 import "server-only";
 
 import {
-  dailyReturnPoints, simulateVirtualBasket, validateBasket, VIRTUAL_BASKET_INITIAL_NAV_ATOMIC,
-  type BasketAgentResult, type BasketAgentWeight, type BasketPolicy, type BasketSnapshot,
+  dailyReturnPoints, DEFAULT_BASKET_POLICY, simulateVirtualBasket, validateBasket, VIRTUAL_BASKET_INITIAL_NAV_ATOMIC,
+  type BasketAgentResult, type BasketAgentWeight, type BasketSnapshot,
 } from "@/lib/baskets";
 import {
   computeAgentPerformance, windowSinceMs,
@@ -23,6 +23,9 @@ import {
 } from "@/lib/agents/performance";
 import { getAgentTradeRows, listBaskets } from "@/lib/db";
 import { listDirectoryAgents, type DirectoryAgent } from "./agent-directory";
+
+/** Re-export so API routes keep importing from the server basket module. */
+export { DEFAULT_BASKET_POLICY };
 
 export interface BasketDefinition {
   id: string;
@@ -36,14 +39,6 @@ export interface BasketDefinition {
   subscriberCount?: number;
   createdAt?: number;
 }
-
-/** Default policy: no agent over 40%, no category over 60%. */
-export const DEFAULT_BASKET_POLICY: BasketPolicy = {
-  maxSingleAgentBps: 4_000,
-  maxCategoryBps: 6_000,
-  staleSignalAction: "skip",
-  failedCopyAction: "keep_idle",
-};
 
 /**
  * Curated baskets.

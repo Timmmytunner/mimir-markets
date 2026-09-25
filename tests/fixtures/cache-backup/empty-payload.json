@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "mimir-read-index-backup",
+  "hashAlgorithm": "sha256",
+  "createdAt": 1700000600000,
+  "source": {
+    "contractAddress": "CAQPTFHY5VXSWR3CNRGFVLGDNEH4NCOE2PCZL4QZ4JQMWVD54GRCMQPX",
+    "network": "stellar:testnet",
+    "appVersion": "0.1.0"
+  },
+  "checksum": "e5881580fdc6bccc7f420f85c6e7fef27f9836c689618273c078628043a076b8",
+  "tables": {
+    "claims": [],
+    "challengers": [],
+    "sync_meta": [],
+    "market_settlements": [],
+    "fee_accruals": [],
+    "fee_claims": [],
+    "fee_policies": [],
+    "agent_revenue_attribution": []
+  }
+}

@@ -229,7 +229,7 @@ export type StellarVerifyResult =
     }
   | { ok: false; reason: StellarVerifyFailure; message: string };
 
-interface HorizonPaymentOperation {
+export interface HorizonPaymentOperation {
   type: string;
   from?: string;
   to?: string;
@@ -238,6 +238,38 @@ interface HorizonPaymentOperation {
   asset_issuer?: string;
   amount?: string;
   transaction_successful?: boolean;
+}
+
+/**
+ * The two Horizon reads verification performs, as replaceable functions.
+ *
+ * A load test needs to exercise `verifyStellarPayment` (and therefore the
+ * facilitator) deterministically — thousands of verifications, each reading "its
+ * own" transaction — without a live network. Injecting a reader is what allows
+ * that: a fixture backend answers from memory, and production code keeps using
+ * {@link horizonPaymentReader()} below. Failures must be shaped like Horizon's so
+ * the caller's distinguished handling (404 → `transaction_not_found`, anything
+ * else → `horizon_unavailable`) still fires.
+ */
+export interface StellarHorizonReader {
+  /** Resolve a transaction. Throw `{ response: { status: 404 } }` when absent. */
+  getTransaction(txHash: string): Promise<{ createdAtMs: number; successful: boolean }>;
+  getPaymentOperations(txHash: string): Promise<HorizonPaymentOperation[]>;
+}
+
+/** The real reader: two Horizon requests, like the code always made. */
+export function horizonPaymentReader(): StellarHorizonReader {
+  const horizon = createHorizonServer();
+  return {
+    async getTransaction(txHash: string) {
+      const tx = await horizon.transactions().transaction(txHash).call();
+      return { createdAtMs: Date.parse(tx.created_at), successful: tx.successful };
+    },
+    async getPaymentOperations(txHash: string) {
+      const page = await horizon.operations().forTransaction(txHash).limit(200).call();
+      return page.records as unknown as HorizonPaymentOperation[];
+    },
+  };
 }
 
 /**
@@ -250,7 +282,7 @@ interface HorizonPaymentOperation {
 export async function verifyStellarPayment(
   payload: Readonly<Record<string, unknown>>,
   requirements: PaymentRequirements,
-  options: { maxAgeMs?: number; now?: number } = {},
+  options: { maxAgeMs?: number; now?: number; backend?: StellarHorizonReader } = {},
 ): Promise<StellarVerifyResult> {
   const proof = parsePaymentProof(payload);
   if (!proof) {
@@ -301,12 +333,12 @@ export async function verifyStellarPayment(
     };
   }
 
-  const horizon = createHorizonServer();
+  const reader = options.backend ?? horizonPaymentReader();
   let createdAt: number;
   let successful: boolean;
   try {
-    const tx = await horizon.transactions().transaction(proof.transaction).call();
-    createdAt = Date.parse(tx.created_at);
+    const tx = await reader.getTransaction(proof.transaction);
+    createdAt = tx.createdAtMs;
     successful = tx.successful;
   } catch (cause) {
     const status = (cause as { response?: { status?: number } })?.response?.status;
@@ -345,8 +377,7 @@ export async function verifyStellarPayment(
 
   let operations: HorizonPaymentOperation[];
   try {
-    const page = await horizon.operations().forTransaction(proof.transaction).limit(200).call();
-    operations = page.records as unknown as HorizonPaymentOperation[];
+    operations = await reader.getPaymentOperations(proof.transaction);
   } catch (cause) {
     return {
       ok: false,
@@ -420,7 +451,24 @@ function verifyProofSignature(proof: StellarPaymentProof, message: string): bool
  * window, which is the only period where a hash can still be presented.
  */
 const consumed = new Set<string>();
-const CONSUMED_MAX = 4096;
+export const CONSUMED_MAX = 4096;
+
+/**
+ * Test and operational seam: clear the in-process replay set.
+ *
+ * The set is process-local by design, so a load test (which verifies and settles
+ * thousands of hashes against fixtures in one process) would otherwise inherit
+ * settlements from an earlier test block. Nothing about replay semantics changes
+ * — this is the same reset a worker restart performs implicitly.
+ */
+export function resetConsumedSettlements(): void {
+  consumed.clear();
+}
+
+/** How many hashes the in-process replay set currently holds (bounded by `CONSUMED_MAX`). */
+export function consumedSettlementsCount(): number {
+  return consumed.size;
+}
 
 /**
  * Claim a transaction hash for exactly one settlement. `false` means replay.
@@ -441,6 +489,13 @@ const CONSUMED_MAX = 4096;
  * both would have to be signed by the payer's own key, so the worst case is a
  * buyer double-spending its own proof against itself. Adding a distributed lock
  * to the request path to close that is not a trade worth making.
+ *
+ * **Contrast with `lib/server/nonce-store.ts`**: the agent API uses caller-supplied
+ * nonce strings that do not have an inherent lifetime guarantee from the ledger, so
+ * it maintains a separate `agent_api_nonces` table with per-row `expires_at` TTLs.
+ * x402 transaction hashes are already single-use by the ledger (a transaction can
+ * only land once), which is why `payments_v2` is sufficient here and no extra nonce
+ * table is needed for this path.
  *
  * With no DATABASE_URL only the in-process layer exists; that is the same
  * degradation the payments ledger itself already accepts.
@@ -556,6 +611,12 @@ export class ExactStellarFacilitator implements SchemeNetworkFacilitator {
   /** Groups this facilitator's signers by family in the supported response. */
   readonly caipFamily = "stellar:*";
 
+  /**
+   * @param backend optional Horizon reader for deterministic tests. Absent, the
+   * real reader (live Horizon reads) is used, exactly as before.
+   */
+  constructor(private readonly backend?: StellarHorizonReader) {}
+
   getExtra(_network: Network): Record<string, unknown> | undefined {
     return {
       assetCode: X402_ASSET_CODE,
@@ -579,7 +640,9 @@ export class ExactStellarFacilitator implements SchemeNetworkFacilitator {
     payload: PaymentPayload,
     requirements: PaymentRequirements,
   ): Promise<VerifyResponse> {
-    const result = await verifyStellarPayment(payload.payload, requirements);
+    const result = await verifyStellarPayment(payload.payload, requirements, {
+      backend: this.backend,
+    });
     if (!result.ok) {
       return { isValid: false, invalidReason: result.reason, invalidMessage: result.message };
     }
@@ -601,7 +664,9 @@ export class ExactStellarFacilitator implements SchemeNetworkFacilitator {
     payload: PaymentPayload,
     requirements: PaymentRequirements,
   ): Promise<SettleResponse> {
-    const result = await verifyStellarPayment(payload.payload, requirements);
+    const result = await verifyStellarPayment(payload.payload, requirements, {
+      backend: this.backend,
+    });
     if (!result.ok) {
       return {
         success: false,
@@ -646,9 +711,14 @@ export class ExactStellarFacilitator implements SchemeNetworkFacilitator {
  * object is mandatory — but nothing requires it to speak HTTP.
  */
 export class LocalStellarFacilitatorClient implements FacilitatorClient {
-  private readonly facilitator = new ExactStellarFacilitator();
+  private readonly facilitator: ExactStellarFacilitator;
 
-  constructor(private readonly networks: Network[] = [X402_NETWORK]) {}
+  constructor(
+    private readonly networks: Network[] = [X402_NETWORK],
+    backend?: StellarHorizonReader,
+  ) {
+    this.facilitator = new ExactStellarFacilitator(backend);
+  }
 
   verify(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse> {
     return this.facilitator.verify(payload, requirements);
