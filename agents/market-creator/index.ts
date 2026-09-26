@@ -1152,7 +1152,9 @@ async function main(): Promise<void> {
   console.log("═══════════════════════════════════════════════\n");
 
   const safeRun = () =>
-    reportingPoll("market_creator", "market-creator", RUN_INTERVAL_HOURS * 3600, run);
+    reportingPoll("market_creator", "market-creator", RUN_INTERVAL_HOURS * 3600, run, {
+      pause: "market_creator_worker",
+    });
 
   await safeRun();
   setInterval(safeRun, RUN_INTERVAL_HOURS * 3600 * 1000);

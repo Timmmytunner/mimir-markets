@@ -10,6 +10,7 @@
  */
 
 import { sha256Hex } from "@/lib/content-hash";
+import { isPaused } from "@/lib/ops/flags";
 import { isAccountAddress, isContractAddress } from "@/lib/stellar";
 import { parseUsdcAtomic } from "@/lib/usdc";
 
@@ -83,7 +84,10 @@ export type CopySkipReason =
 
 export interface CopyExecutionContext {
   now: number;
+  /** Caller-side stop. MIMIR_PAUSE_COPY_EXECUTION is checked regardless of this. */
   globalPaused: boolean;
+  /** Env the incident switch is read from; defaults to process.env. */
+  env?: Record<string, string | undefined>;
   usage: CopyUsage;
   existingClaimIds: ReadonlySet<number>;
   ancestryAgentIds: readonly string[];
@@ -136,7 +140,9 @@ export function worstCaseCopySpend(permission: CopyPermission): { perPositionUsd
 
 export function evaluateCopy(permission: CopyPermission, signal: CopySignal, context: CopyExecutionContext):
   { allowed: true; stakeUsdc: number } | { allowed: false; reason: CopySkipReason } {
-  if (context.globalPaused) return { allowed: false, reason: "global_paused" };
+  // The switch is read here, not left to the caller: an executor that forgot to
+  // map it into `globalPaused` would otherwise keep copying through an incident.
+  if (context.globalPaused || isPaused("copy_execution", context.env)) return { allowed: false, reason: "global_paused" };
   if (permission.status === "revoked") return { allowed: false, reason: "permission_revoked" };
   if (permission.status === "paused") return { allowed: false, reason: "permission_paused" };
   if (!Number.isSafeInteger(context.now) || !context.usage ||

@@ -5,6 +5,12 @@ members = [
   "mimir-squad",
 ]
 
+[workspace.package]
+# The oldest rustc these contracts are tested with: soroban-sdk 25.3.2's own
+# rust-version. The release toolchain is pinned separately in the repo-root
+# rust-toolchain.toml; see docs/CONTRACT_TOOLCHAINS.md.
+rust-version = "1.91"
+
 [workspace.dependencies]
 soroban-sdk = "25.3.2"
 

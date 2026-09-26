@@ -2,6 +2,7 @@
 name = "mimir-market"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 publish = false
 description = "Mimir oracle-settled prediction market (Soroban port of contracts/MimirV2.sol)"
 

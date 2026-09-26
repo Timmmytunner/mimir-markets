@@ -2,7 +2,7 @@
 
 use soroban_sdk::{contracttype, Address, Env};
 
-use crate::types::{Error, Market};
+use crate::types::{Error, Market, MarketFeeBalance};
 
 #[contracttype]
 #[derive(Clone)]
@@ -13,7 +13,11 @@ pub enum DataKey {
     FeeRecipient,
     MarketCount,
     AccruedFees,
+    /// Bumped by global `claim_fees` so per-market ledgers invalidate in O(1).
+    FeeClaimSeq,
     Market(u64),
+    /// Isolated per-market accrued fees (amount + claim-seq generation).
+    MarketFees(u64),
     /// (market, side, participant) -> deposited units. Shares equal units.
     Deposit(u64, u32, Address),
     /// (market, side, participant) -> already claimed.
@@ -82,6 +86,76 @@ pub fn accrued_fees(env: &Env) -> i128 {
 
 pub fn set_accrued_fees(env: &Env, value: i128) {
     env.storage().instance().set(&DataKey::AccruedFees, &value);
+}
+
+pub fn fee_claim_seq(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::FeeClaimSeq)
+        .unwrap_or(0)
+}
+
+pub fn bump_fee_claim_seq(env: &Env) {
+    let next = fee_claim_seq(env) + 1;
+    env.storage().instance().set(&DataKey::FeeClaimSeq, &next);
+}
+
+/// Accrue `delta` onto the isolated ledger for `id` at the current claim seq.
+pub fn add_market_fees(env: &Env, id: u64, delta: i128) {
+    if delta == 0 {
+        return;
+    }
+    let seq = fee_claim_seq(env);
+    let key = DataKey::MarketFees(id);
+    let mut bal: MarketFeeBalance = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(MarketFeeBalance { amount: 0, seq });
+    if bal.seq != seq {
+        bal.amount = 0;
+        bal.seq = seq;
+    }
+    bal.amount += delta;
+    env.storage().persistent().set(&key, &bal);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_EXTEND);
+}
+
+/// Live (non-stale) accrued fees for one market. Stale seq ⇒ 0.
+pub fn market_fees(env: &Env, id: u64) -> i128 {
+    let seq = fee_claim_seq(env);
+    let bal: MarketFeeBalance = env
+        .storage()
+        .persistent()
+        .get(&DataKey::MarketFees(id))
+        .unwrap_or(MarketFeeBalance { amount: 0, seq: 0 });
+    if bal.seq != seq {
+        return 0;
+    }
+    bal.amount
+}
+
+/// Take (zero) the live fee balance for `id`. Returns 0 if stale or empty.
+pub fn take_market_fees(env: &Env, id: u64) -> i128 {
+    let seq = fee_claim_seq(env);
+    let key = DataKey::MarketFees(id);
+    let bal: MarketFeeBalance = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(MarketFeeBalance { amount: 0, seq: 0 });
+    if bal.seq != seq || bal.amount <= 0 {
+        return 0;
+    }
+    env.storage()
+        .persistent()
+        .set(&key, &MarketFeeBalance { amount: 0, seq });
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_EXTEND);
+    bal.amount
 }
 
 // ── Markets ──────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 name = "mimir-squad"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 publish = false
 description = "Mimir two-sided squad pool (Soroban port of contracts/MimirSquad.sol)"
 

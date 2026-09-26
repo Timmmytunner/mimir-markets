@@ -22,6 +22,7 @@
  */
 import {
   Account,
+  Address,
   Asset,
   BASE_FEE,
   Contract,
@@ -35,6 +36,8 @@ import {
   createSorobanRpcServer,
   getUsdcIssuer,
   getUsdcSacId,
+  isAccountAddress,
+  isContractAddress,
   isUsdcConfigured,
 } from "./stellar";
 
@@ -183,3 +186,47 @@ export async function getUsdcBalanceUnits(
     return null;
   }
 }
+
+/**
+ * Live SEP-41 SAC allowance read for (from, spender) in atomic units (7 decimals).
+ * Returns null if unconfigured, if simulation fails, or if either address is invalid.
+ */
+export async function getUsdcAllowanceUnits(
+  from: string,
+  spender: string,
+  options: { server?: rpc.Server; sacId?: string } = {},
+): Promise<bigint | null> {
+  const sacId = options.sacId ?? USDC_SAC_ID;
+  if (!sacId || !isUsdcConfigured()) return null;
+  const trimmedFrom = from?.trim() ?? "";
+  const trimmedSpender = spender?.trim() ?? "";
+  if (!isAccountAddress(trimmedFrom) && !isContractAddress(trimmedFrom)) return null;
+  if (!isAccountAddress(trimmedSpender) && !isContractAddress(trimmedSpender)) return null;
+
+  try {
+    const server = options.server ?? createSorobanRpcServer();
+    const tx = new TransactionBuilder(new Account(USDC_ISSUER, "0"), {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        new Contract(sacId).call(
+          "allowance",
+          new Address(trimmedFrom).toScVal(),
+          new Address(trimmedSpender).toScVal(),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulated = await server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
+      return null;
+    }
+    const val = scValToNative(simulated.result.retval);
+    return typeof val === "bigint" ? val : BigInt(val);
+  } catch {
+    return null;
+  }
+}
+

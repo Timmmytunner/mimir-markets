@@ -38,7 +38,7 @@ import {
   proofPayer,
 } from "./stellar-scheme";
 import { recordPayment } from "../paid-revenue";
-import { checkWriteAllowed } from "../ops/flags";
+import { sellingPausedResponse } from "./kill-switch";
 
 /**
  * A settled payment lands here exactly once per request. Awaited by the SDK, so
@@ -207,12 +207,12 @@ export function paidRoute<T>(
   // degraded we stop selling — a verifier that cannot read the ledger must refuse
   // rather than guess — while market settlement and withdrawal keep working.
   const withKillSwitch = async (req: NextRequest): Promise<NextResponse<T>> => {
-    const gate = checkWriteAllowed({ capability: "x402_selling" });
-    if (!gate.allowed) {
-      return NextResponse.json(
-        { error: "paid endpoints are temporarily unavailable", detail: gate.detail },
-        { status: 503, headers: { "retry-after": "60" } },
-      ) as NextResponse<T>;
+    const paused = sellingPausedResponse();
+    if (paused) {
+      return NextResponse.json(paused.body, {
+        status: paused.status,
+        headers: paused.headers,
+      }) as NextResponse<T>;
     }
     const { authorizeRequest } = await import("@/lib/api/policy");
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;

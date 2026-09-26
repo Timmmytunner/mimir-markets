@@ -19,6 +19,8 @@
 
 import { getSyncMeta, setSyncMeta, isDbConfigured } from "@/lib/db";
 
+import { pauseEnvKey, pauseState, type Pausable } from "./flags";
+
 import {
   decodeHeartbeat,
   encodeHeartbeat,
@@ -73,13 +75,28 @@ export async function beat(
  * Swallows the error like the loops it replaces — a worker must keep polling
  * after a bad cycle — but reports it, so a crash-looping worker shows as alive
  * and failing rather than merely stale.
+ *
+ * `pause` names the incident switch for this worker. A paused worker skips the
+ * cycle but keeps running and beating: exiting would trip `npm run workers`'
+ * --kill-others-on-fail and take every other worker down with it, and a missing
+ * heartbeat would page as a dead worker for what is a deliberate stop.
  */
 export async function reportingPoll(
   worker: MonitoredWorker,
   label: string,
   intervalSec: number,
   poll: () => Promise<unknown>,
+  opts: { pause?: Pausable; env?: Record<string, string | undefined> } = {},
 ): Promise<void> {
+  if (opts.pause) {
+    const state = pauseState(opts.pause, opts.env);
+    if (state.paused) {
+      const via = state.viaGlobal ? "MIMIR_PAUSE_ALL" : pauseEnvKey(opts.pause);
+      console.warn(`[${label}] paused by ${via}, skipping this cycle${state.reason ? `: ${state.reason}` : ""}`);
+      await beat(worker, { intervalSec });
+      return;
+    }
+  }
   try {
     await poll();
     await beat(worker, { intervalSec });

@@ -109,10 +109,22 @@ export function useShareAttribution(ctx: MarketContext): void {
 
 export interface StakePreviewSignal {
   stake: number;
+  /** GROSS formula output — see the note at the `vs_detail` call site. */
   totalReturn: number;
   netProfit: number;
   upsideBps: number;
+  /**
+   * Thin upside as the WARNING saw it, i.e. measured on the fee-adjusted net when
+   * a fee snapshot was available. This is the one field here that follows the
+   * user-visible number, because the metric is "was the user warned".
+   */
   isLowUpside: boolean;
+  /**
+   * Whether the on-screen payout was fee-adjusted. Distinguishes the two cases a
+   * dashboard otherwise cannot tell apart: a market with no fee, and a market
+   * whose fee terms could not be read.
+   */
+  feeAdjusted: boolean;
 }
 
 /**
@@ -138,6 +150,7 @@ export function useStakePreviewTracking(
       stake_bucket: stakeBucket(preview.stake),
       upside_bps: preview.upsideBps,
       is_low_upside: preview.isLowUpside,
+      fee_adjusted: preview.feeAdjusted,
       total_return_multiple:
         preview.stake > 0 ? Math.round((preview.totalReturn / preview.stake) * 100) / 100 : 0,
     };

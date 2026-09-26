@@ -27,7 +27,7 @@ test("positive: builds CycloneDX 1.5 SBOM from a valid lockfile fixture", () => 
   assert.equal(bom.metadata.timestamp, "2026-01-01T00:00:00.000Z");
   assert.ok(bom.components.length >= 2, "expected direct + transitive components");
 
-  const names = bom.components.map((c) => c.name).sort();
+  const names = bom.components.map((c: any) => c.name).sort();
   assert.deepEqual(names, ["left-pad", "ms"]);
   for (const c of bom.components) {
     assert.equal(c.type, "library");
@@ -36,7 +36,7 @@ test("positive: builds CycloneDX 1.5 SBOM from a valid lockfile fixture", () => 
     assert.ok(c["bom-ref"]);
   }
   // Deterministic ordering by purl
-  const purls = bom.components.map((c) => c.purl);
+  const purls = bom.components.map((c: any) => c.purl);
   assert.deepEqual(purls, [...purls].sort());
 });
 
@@ -83,7 +83,7 @@ test("regression: scoped package names encode into valid purls", () => {
       },
     },
   });
-  const c = bom.components[0];
+  const c: any = bom.components[0];
   assert.equal(c.name, "@scope/pkg");
   assert.match(c.purl, /^pkg:npm\/%40scope\/pkg@9\.9\.9$/);
   assert.ok(c.hashes?.[0]?.alg === "SHA-512");

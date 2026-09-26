@@ -27,12 +27,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32v1-none
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run check:terms
+      - run: npm run check:toolchains
       - run: npm run typecheck
       - run: npm run test:contracts
       - run: cargo build --manifest-path contracts-soroban/Cargo.toml --release --target wasm32v1-none
@@ -41,6 +39,73 @@ jobs:
       - run: npm run verify:cache-backup -- tests/fixtures/cache-backup/valid.json
       - run: npm run test:smoke
       - run: npm run build
+
+  # Contract tests and wasm builds across the toolchains the contracts support.
+  # `npm run check:toolchains` (above) fails the PR if these entries drift from
+  # rust-toolchain.toml or the rust-version in contracts-soroban/Cargo.toml.
+  # See docs/CONTRACT_TOOLCHAINS.md.
+  contracts:
+    name: contracts (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Each entry answers a different question; one failing must not hide the others.
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported rustc: rust-version in contracts-soroban/Cargo.toml.
+          - name: msrv
+            toolchain: "1.91.0"
+          # The toolchain deployed wasm is built with: rust-toolchain.toml.
+          - name: release
+            toolchain: "1.98.1"
+          # Early warning for the next rustc; bump the release pin deliberately.
+          - name: stable
+            toolchain: stable
+    env:
+      # Overrides rust-toolchain.toml so each entry really builds with its own rustc.
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          targets: wasm32v1-none
+      - run: rustc --version --verbose
+      # --locked: build exactly the committed Cargo.lock, never a re-resolved one.
+      - run: cargo test --manifest-path contracts-soroban/Cargo.toml --release --locked
+      - run: cargo build --manifest-path contracts-soroban/Cargo.toml --release --target wasm32v1-none --locked
+      - name: wasm hashes
+        run: |
+          {
+            echo "### wasm sha256 (${{ matrix.name }}, $(rustc --version))"
+            echo '```'
+            sha256sum contracts-soroban/target/wasm32v1-none/release/*.wasm
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      # Provenance pins in deploy/contract-artifacts.manifest.json describe the
+      # release toolchain's output: rustc's version is inside the wasm metadata,
+      # so msrv and stable builds could never match a pin, by design.
+      - if: matrix.name == 'release'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: matrix.name == 'release'
+        run: npm ci
+      - if: matrix.name == 'release'
+        run: npm run verify:artifacts -- --require-built
+      # Only the release build is what `npm run deploy:contract` would ship; keep
+      # it so a reviewer can compare hashes without building locally.
+      - if: matrix.name == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-wasm-release
+          path: contracts-soroban/target/wasm32v1-none/release/*.wasm
+          if-no-files-found: error
+          retention-days: 14
 
   browser-smoke:
     runs-on: ubuntu-latest

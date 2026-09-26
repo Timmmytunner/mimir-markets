@@ -2354,8 +2354,8 @@ const { key } = await call("issueKey", "my-agent", { label: "server" });
           <Card title="Pause switches (incident)">
             <code className="rounded bg-pv-surface2 px-1 text-xs">MIMIR_PAUSE_{"{CAPABILITY}"}=1</code>{" "}
             stops one capability: create_market, stake, copy_execution, x402_selling,
-            x402_buying, agent_registration, market_creator_worker, council_worker or
-            oracle_settlement. <code className="rounded bg-pv-surface2 px-1 text-xs">MIMIR_PAUSE_ALL=1</code>{" "}
+            x402_buying, agent_registration, market_creator_worker, council_worker,
+            oracle_settlement or research. <code className="rounded bg-pv-surface2 px-1 text-xs">MIMIR_PAUSE_ALL=1</code>{" "}
             covers the whole set. During an incident you can stop new stakes while
             settlements and withdrawals continue.
           </Card>

@@ -95,21 +95,17 @@ export async function handleClaimModerationPost(args: {
     const key = hashModerationInput({ locale, input });
     const cached = moderationResultCache.get(key);
     if (cached) {
-      return NextResponse.json(cached, {
-        headers: {
-          "X-Moderation-Cache": "HIT",
-        },
-      });
+      const response = NextResponse.json(cached);
+      response.headers.set("X-Moderation-Cache", "HIT");
+      return response;
     }
 
     const existing = moderationInFlight.get(key);
     if (existing) {
       const result = await existing;
-      return NextResponse.json(result, {
-        headers: {
-          "X-Moderation-Dedupe": "INFLIGHT",
-        },
-      });
+      const response = NextResponse.json(result);
+      response.headers.set("X-Moderation-Dedupe", "INFLIGHT");
+      return response;
     }
 
     const p = args
@@ -126,11 +122,9 @@ export async function handleClaimModerationPost(args: {
 
     moderationInFlight.set(key, p);
     const result = await p;
-    return NextResponse.json(result, {
-      headers: {
-        "X-Moderation-Cache": "MISS",
-      },
-    });
+    const response = NextResponse.json(result);
+    response.headers.set("X-Moderation-Cache", "MISS");
+    return response;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to moderate claim";

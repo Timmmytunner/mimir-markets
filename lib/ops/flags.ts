@@ -30,6 +30,9 @@ export const PAUSABLE = [
   "market_creator_worker",
   "council_worker",
   "oracle_settlement",
+  // Outbound source fetches through `lib/research/gateway.ts`. Listed here rather
+  // than read ad hoc so `MIMIR_PAUSE_ALL` reaches it like every other switch.
+  "research",
 ] as const;
 export type Pausable = (typeof PAUSABLE)[number];
 
@@ -49,7 +52,7 @@ export function isNeverPausable(value: string): value is NeverPausable {
 }
 
 /** MIMIR_PAUSE_STAKE=1 pauses staking. */
-function envKeyFor(capability: Pausable): string {
+export function pauseEnvKey(capability: Pausable): string {
   return `MIMIR_PAUSE_${capability.toUpperCase()}`;
 }
 
@@ -93,7 +96,7 @@ export function buildPauseDetail(
 
   const rawAt = state.viaGlobal
     ? env.MIMIR_PAUSE_ALL_AT
-    : env[`${envKeyFor(capability)}_AT`];
+    : env[`${pauseEnvKey(capability)}_AT`];
   const pausedAt =
     rawAt !== undefined && /^\d+$/.test(rawAt.trim())
       ? parseInt(rawAt.trim(), 10)
@@ -112,11 +115,11 @@ export function pauseState(
   capability: Pausable,
   env: Record<string, string | undefined> = process.env,
 ): PauseState {
-  const specific = env[envKeyFor(capability)] === "1";
+  const specific = env[pauseEnvKey(capability)] === "1";
   if (specific) {
     return {
       paused: true,
-      reason: env[`${envKeyFor(capability)}_REASON`] ?? env.MIMIR_PAUSE_REASON,
+      reason: env[`${pauseEnvKey(capability)}_REASON`] ?? env.MIMIR_PAUSE_REASON,
       viaGlobal: false,
     };
   }

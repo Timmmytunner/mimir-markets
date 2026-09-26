@@ -182,9 +182,18 @@ export function isConfirmedCouncilSettlement(
   evidenceHash: string,
   pending: boolean,
 ): boolean {
-  return !pending && claim?.state === "resolved" &&
+  // Normalize both sides: strip an optional `0x` prefix and fold to lowercase.
+  // The on-chain `evidence_hash` is decoded from `BytesN<32>` and re-encoded as
+  // bare lowercase hex in `lib/contract.ts`'s `toHex`, but a caller or older
+  // read path might supply a `0x`-prefixed value. Using the same normalization
+  // that `verifyEvidenceCommitment` uses keeps the comparison consistent.
+  const normalize = (h: string) => h.trim().toLowerCase().replace(/^0x/, "");
+  return (
+    !pending &&
+    claim?.state === "resolved" &&
     claim.winner_side === expectedSide &&
-    claim.evidence_hash?.toLowerCase() === evidenceHash.toLowerCase();
+    normalize(claim.evidence_hash ?? "") === normalize(evidenceHash)
+  );
 }
 
 /** Personas that can judge a claim: evidence-reasoning (have a promptBias) and,

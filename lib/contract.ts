@@ -951,11 +951,13 @@ export async function challengeClaim(
   stakeAmount: number,
   inviteKey = ""
 ): Promise<ClaimWriteResult> {
+  // Before the demo branch, as in createClaim: the demo relay signs with a funded
+  // server key, so a stake pause that only covered the non-demo path was bypassed.
+  const stakeGate = checkWriteAllowed({ capability: "stake" });
+  if (!stakeGate.allowed) throw new Error(stakeGate.detail ?? "staking is unavailable");
   if (isDemoMode()) {
     return sendDemoTx("challenge_claim", { claimId, stakeAmount, inviteKey });
   }
-  const stakeGate = checkWriteAllowed({ capability: "stake" });
-  if (!stakeGate.allowed) throw new Error(stakeGate.detail ?? "staking is unavailable");
   await assertChallengeAllowed(claimId, stakeAmount);
 
   const signer = requireSigner(wallet, "join this market");
@@ -989,6 +991,10 @@ export async function resolveClaim(
     evidence_hash?: string;
   },
 ): Promise<ClaimWriteResult> {
+  // Pausing settlement only delays it: withdraw and payout claims stay ungated, and
+  // an expired claim is simply settled on the first poll after the switch clears.
+  const gate = checkWriteAllowed({ capability: "oracle_settlement" });
+  if (!gate.allowed) throw new Error(gate.detail ?? "settlement is unavailable");
   if (isDemoMode()) {
     return sendDemoTx("resolve_claim", { claimId });
   }
@@ -1041,6 +1047,9 @@ export async function createRematch(
   parentId: number,
   params: Pick<CreateClaimParams, "deadline" | "stake_amount" | "invite_key">
 ): Promise<ClaimWriteResult> {
+  // The non-demo path reaches createClaim's gate; the demo relay does not.
+  const gate = checkWriteAllowed({ capability: "create_market" });
+  if (!gate.allowed) throw new Error(gate.detail ?? "market creation is unavailable");
   if (isDemoMode()) {
     return sendDemoTx("create_rematch", { parentId, ...params });
   }
@@ -1212,6 +1221,9 @@ export async function createSquadMarket(
   wallet: WalletArg,
   params: { question: string; deadline: number; fee_bps: number },
 ): Promise<ContractWriteResult & { marketId: number }> {
+  // Squad pools move USDC like binary markets do, so the same switches stop them.
+  const gate = checkWriteAllowed({ capability: "create_market" });
+  if (!gate.allowed) throw new Error(gate.detail ?? "market creation is unavailable");
   const signer = requireSigner(wallet, "open this squad market");
   const { value, write } = await sendCall<bigint>(
     "create_market",
@@ -1231,6 +1243,8 @@ export async function squadDeposit(
   side: number,
   amount: number,
 ): Promise<ContractWriteResult> {
+  const gate = checkWriteAllowed({ capability: "stake" });
+  if (!gate.allowed) throw new Error(gate.detail ?? "staking is unavailable");
   const signer = requireSigner(wallet, "back this side");
   const { write } = await sendCall<void>(
     "deposit",

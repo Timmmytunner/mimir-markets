@@ -182,7 +182,7 @@ export function scorePreflight(
       : unscored.length > 0
         ? `unscored: ${unscored.join(", ")}`
         : failing.length > 0
-          ? `below floor: ${failing.join(", ")}`
+          ? `below floor: ${failing.map(d => `${d} (score ${dimensions[d].score} < ${DIMENSION_FLOORS[d]} floor)`).join(", ")}`
           : modeContested
             ? "panel disagrees about the settlement mode"
             : requestedMode && suggestedMode && requestedMode !== suggestedMode

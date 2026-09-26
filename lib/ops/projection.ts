@@ -27,6 +27,8 @@
  * stable enough to test.
  */
 
+import { isHash32Hex } from "../content-hash";
+
 export type ChainEventName =
   | "ClaimCreated"
   | "ClaimChallenged"
@@ -196,7 +198,15 @@ export function project(
         claim.state = "resolved";
         claim.winnerSide = event.winnerSide ?? 0;
         claim.confidence = event.confidence ?? 0;
-        claim.evidenceHash = event.evidenceHash ?? null;
+        // Validate the hash before storing it. A malformed `evidenceHash` in the
+        // event (e.g. a legacy placeholder like "sha256:fixture-evidence" from
+        // a test fixture, or a truncated value from a buggy decoder) is stored as
+        // null rather than verbatim, so the fingerprint is stable and the read-index
+        // never reports a hash that `decodeHash32Hex` would reject at the contract
+        // boundary. `isHash32Hex` accepts both bare hex and the `0x`-prefixed form.
+        claim.evidenceHash = isHash32Hex(event.evidenceHash ?? null)
+          ? (event.evidenceHash ?? null)
+          : null;
         claim.isFinal = true;
         break;
       case "ClaimCancelled":

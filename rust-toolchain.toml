@@ -1,0 +1,17 @@
+# Release toolchain for contracts-soroban.
+#
+# Pinned exactly because soroban-sdk writes the rustc version into each wasm's
+# contract metadata (`rsver`), so the deployed wasm hash that
+# `npm run verify:deployment` compares against a local build only reproduces
+# with this exact compiler. At the repo root, not in contracts-soroban/, because
+# rustup resolves this file from the working directory and `npm run
+# test:contracts` runs from here.
+#
+# Bump it together with the "release" entry of the contract matrix in
+# .github/workflows/ci.yml (`npm run check:toolchains` enforces that), then
+# redeploy: the next deploy's wasm hash becomes the new baseline.
+# See docs/CONTRACT_TOOLCHAINS.md.
+[toolchain]
+channel = "1.98.1"
+targets = ["wasm32v1-none"]
+profile = "minimal"

@@ -94,6 +94,30 @@ oracle does not settle them and `gatherCouncilVerdict` returns `null` first.
 bytes alone, for readers who only want to check the public body before rebuilding
 the full framed commitment.
 
+## Read-index storage
+
+`lib/ops/projection.ts` stores `evidenceHash` from `ClaimResolved` events into the
+read-index. Since projection v1:
+
+- A valid 32-byte hex digest (bare or `0x`-prefixed) is preserved verbatim.
+- A malformed value (e.g. a legacy placeholder like `"sha256:fixture-evidence"`, a
+  truncated hash, or any non-hex string) is stored as `null` rather than written
+  through. This keeps the fingerprint stable and ensures the cache never holds a
+  hash that `decodeHash32Hex` would reject at the contract boundary.
+
+No data migration is required: any `evidenceHash` already in the read-index that
+passes `isHash32Hex` is kept, and those that do not are replaced with `null` on the
+next resync.
+
+## Council bonus confirmation
+
+`isConfirmedCouncilSettlement` in `agents/oracle/council-vote.ts` gates the
+post-settlement bonus payout. It compares the local `evidenceHash` against
+`claim.evidence_hash` read back from the contract. Both values are normalized
+before comparison: any `0x` prefix is stripped and both sides are lowercased. This
+matches the normalization applied by `verifyEvidenceCommitment` and ensures the
+comparison is correct regardless of which encoding path produced each value.
+
 ## Migration and rollback
 
 - Digests have a new meaning: the previous value was a hash over a plain string

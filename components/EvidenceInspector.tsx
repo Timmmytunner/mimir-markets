@@ -113,7 +113,7 @@ export function EvidenceInspector({ vs }: EvidenceInspectorProps) {
               },
             ]}
             deadlineUnix={typeof vs.deadline === "number" ? vs.deadline : null}
-            cancelled={vs.state === "cancelled"}
+            cancelled={false}
           />
 
           {/* Evidence hash */}

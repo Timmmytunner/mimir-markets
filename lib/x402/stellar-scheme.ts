@@ -503,11 +503,15 @@ export function consumedSettlementsCount(): number {
 export async function consumeSettlement(network: string, transaction: string): Promise<boolean> {
   const key = `${network}|${transaction.toLowerCase()}`;
   if (consumed.has(key)) return false;
+  
+  // Claim the hash in-memory BEFORE yielding to the DB read.
+  // This prevents concurrent requests on the same instance from both seeing "unseen"
+  // and both settling successfully before the DB row lands.
+  remember(key);
+  
   if (await settledInLedger(network, transaction)) {
-    remember(key);
     return false;
   }
-  remember(key);
   return true;
 }
 

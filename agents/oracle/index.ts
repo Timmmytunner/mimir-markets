@@ -82,6 +82,7 @@ import {
 } from "../../lib/stellar";
 import { fetchWithBudget, payingWalletFor } from "../../lib/x402/buyer";
 import { reportingPoll } from "../../lib/ops/heartbeat";
+import { isPaused } from "../../lib/ops/flags";
 import { unitsToUsdc, usdcToUnits, formatAtomicUsdc } from "../../lib/usdc";
 import {
   fetchEvidence as fetchEvidenceShared,
@@ -722,6 +723,16 @@ async function poll(): Promise<void> {
     } catch (err) {
       console.error(`[oracle] Error on claim ${id}:`, err);
     }
+  }
+
+  // Checked here as well as in resolveClaim: settle() researches and calls the LLM
+  // (and may buy evidence over x402) before it ever reaches the gated write.
+  // Challenges above are left to the stake switch, so the two pause independently.
+  if (expiredActive.length > 0 && isPaused("oracle_settlement")) {
+    console.warn(
+      `[oracle] Settlement is paused — ${expiredActive.length} expired claim(s) wait for the next poll.`,
+    );
+    expiredActive.length = 0;
   }
 
   expiredActive.sort((a, b) => a.deadline - b.deadline);

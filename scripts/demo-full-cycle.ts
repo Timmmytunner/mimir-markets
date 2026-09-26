@@ -32,7 +32,7 @@ import {
   resolveClaim,
 } from "../lib/contract";
 import { getCreatorWallet, getOracleWallet, readAgentBalances } from "../lib/agent-wallets";
-import { sha256Hex } from "../lib/content-hash";
+import { evidenceCommitmentHash } from "../lib/evidence-commitment";
 import { callLLM, activeLLMProvider, activeLLMModel } from "../lib/llm";
 import { isVerdict, type Verdict } from "../lib/verdict";
 import { requireMarketContractId } from "../lib/stellar";
@@ -93,8 +93,18 @@ async function main(): Promise<void> {
 
   // 4. RESOLVE
   console.log(`\n[4/5] Oracle resolving via LLM…`);
+  const evidenceFetchedAt = Date.now();
   const evidence = await (await fetch(PRICE_URL)).text();
-  const evidenceHash = sha256Hex(evidence);
+  // Use the canonical evidence commitment (length-framed, versioned) so the
+  // demo hash matches what the oracle agent commits in production and can be
+  // independently verified against the source bytes.
+  const evidenceHash = evidenceCommitmentHash({
+    evidence,
+    fetcher: "coingecko-api",
+    sourceUrl: PRICE_URL,
+    fetchedAt: evidenceFetchedAt,
+    now: Date.now(),
+  });
 
   const llm = await callLLM(
     `Claim: Will BTC price be above $100,000 USD?\nEvidence JSON: ${evidence.slice(0, 500)}\n` +

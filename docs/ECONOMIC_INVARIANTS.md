@@ -50,6 +50,35 @@ Source: `contracts-soroban/mimir-market/src/fees.rs`, mirrored off-chain in
   behaviour: the contract asserts escrow moved by exactly the requested amount and
   errors with `UnsupportedToken` otherwise.
 
+### Principal-safe payout preview
+
+The stake form shows what the contract will pay, not the pre-fee pool formula.
+`previewChallengerPayoutSafe` (`lib/payout.ts`) takes the gross from
+`challengerPayoutUnits`, splits it with the claim's own `getClaimFees` snapshot in
+`principalSafePayout`, and returns `netPayout`. Tests:
+`tests/node/payout-preview.test.ts`.
+
+- Fees are charged on profit only, so `netPayout >= principal` in every market.
+  The clamp inside `principalSafePayout` is the backstop for a snapshot that was
+  never valid; `isPrincipalSafe` is the shared assertion the UI and tests use.
+- A snapshot the contract could not have written (negative, non-integer, or above
+  `MAX_TOTAL_FEE_BPS` when the two legs are summed) is classified `invalid` and NOT
+  applied. Any unread snapshot (`loading` / `unavailable` / `invalid`) previews the
+  gross and the UI labels it — an unknown fee can only make the real payout lower,
+  so the gross is a ceiling, never a promise.
+- The preview is address-independent: `fees.rs::quote_fees` charges an agent-owner
+  leg whenever the claim has a recipient and does not waive it by earner (that
+  waiver belongs to the off-chain `splitAttributedFees`, not to settlement). A
+  disconnected viewer therefore sees the same net as the challenger; connection
+  only gates the stake action.
+
+Rollout: no contract change and no data migration. The snapshot is immutable per
+claim, so the read cannot go stale while a page is open — it happens once per
+claim id, and a failed read degrades to the labelled gross. Analytics keeps its
+established gross meaning for `total_return_multiple` and gains a `fee_adjusted`
+marker, so the fee-adjusted and fee-unknown cases stay distinguishable without
+renaming an event or an envelope field.
+
 ### Settlement conservation
 
 `conservation_holds_across_every_verdict` asserts, for every `WinnerSide`, that

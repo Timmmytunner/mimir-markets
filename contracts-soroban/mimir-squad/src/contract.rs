@@ -73,6 +73,15 @@ impl MimirSquad {
         pool::claim_fees(&env)
     }
 
+    /// Isolated per-market fee pull. See `pool::claim_market_fees`.
+    pub fn claim_market_fees(
+        env: Env,
+        who: Address,
+        market_id: u64,
+    ) -> Result<i128, Error> {
+        pool::claim_market_fees(&env, who, market_id)
+    }
+
     // ── Views ────────────────────────────────────────────────────────────────
 
     pub fn get_market(env: Env, market_id: u64) -> Result<Market, Error> {
@@ -102,6 +111,12 @@ impl MimirSquad {
 
     pub fn get_accrued_fees(env: Env) -> i128 {
         storage::accrued_fees(&env)
+    }
+
+    /// Live accrued fees for one market (0 if the ledger was invalidated by a
+    /// global `claim_fees`).
+    pub fn get_market_fees(env: Env, market_id: u64) -> i128 {
+        storage::market_fees(&env, market_id)
     }
 
     pub fn get_usdc(env: Env) -> Result<Address, Error> {

@@ -670,6 +670,38 @@
       "ready": "Contract-backed settlement receipt for this claim."
     }
   },
+  "copyTrading": {
+    "title": "Copy Trading Permissions",
+    "permissionStatus": {
+      "loading": "Checking Contract",
+      "invalid": "Invalid Policy",
+      "stale": "Stale",
+      "disconnected": "Wallet Disconnected",
+      "dependency_failure": "Chain RPC Unavailable",
+      "paused": "Execution Paused",
+      "revoked": "Revoked",
+      "expired": "Expired",
+      "ready": "Contract Backed"
+    },
+    "permissionStatusHint": {
+      "loading": "Querying on-chain allowance and policy bounds.",
+      "invalid": "Permission bounds or addresses violate contract constraints.",
+      "stale": "Policy state may be out of date. Re-querying on-chain allowance.",
+      "disconnected": "Connect owner wallet to manage or verify execution permissions.",
+      "dependency_failure": "Unable to verify Soroban SAC allowance. Retrying when RPC recovers.",
+      "paused": "Copy trading execution is currently paused by platform policy.",
+      "revoked": "This execution permission has been revoked by the owner.",
+      "expired": "This execution permission has passed its expiration timestamp.",
+      "ready": "Active execution permission backed by on-chain USDC allowance."
+    },
+    "allowance": "On-chain Allowance",
+    "signedAllowance": "Signed Allowance",
+    "perPosition": "Max per position",
+    "dailyCap": "Daily cap",
+    "maxLoss": "Max realized loss",
+    "signalAgent": "Signal agent",
+    "executionAgent": "Execution agent"
+  },
   "dashboard": {
     "title": "MY DASHBOARD",
     "total": "{count} total",
@@ -884,6 +916,12 @@
     "totalReturnMultipleHint": "total return",
     "lowUpsideWarning": "Low upside: you risk {stake} to win {profit}. This side already holds most of the money, so the remaining payout is thin.",
     "profitComesFromLosingSide": "Profit comes from the losing side, not from Mimir. Mimir takes no cut of a draw, an unresolvable outcome or a cancellation.",
+    "payoutFeeLine": "Fee on profit: {fee}. Nothing is taken from the stake itself.",
+    "payoutFeeSplit": "(platform {platform} · agent owner {owner})",
+    "payoutFeeChecking": "Checking this market's fee terms…",
+    "payoutFeeUnknown": "Fee terms unavailable — these figures are the gross payout, before fees, so your net will be no higher. Your stake back is unaffected.",
+    "payoutFeeClamped": "This market's fee terms exceed what the contract allows, so the fee is capped at your profit. Your stake back is never touched.",
+    "principalGuarantee": "Your stake back is never reduced by fees.",
     "poolPayoutFormula": "Pool payout: your {stake} returns plus your proportional share of the creator's {creatorStake}. Challenger side after you join: {challengerStake}.",
     "privateInviteRequired": "This challenge is private",
     "privateInviteHint": "You need the creator's private invite link to view and join this challenge.",

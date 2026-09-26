@@ -316,6 +316,133 @@ fn fees_accrue_across_markets_and_are_pulled_by_the_recipient_only() {
     assert_eq!(f.client().claim_fees(), 0);
 }
 
+/// Per-market fee ledgers are isolated: claiming market A's fees leaves market
+/// B's accrual intact, and a non-recipient cannot pull.
+#[test]
+fn fee_claiming_is_isolated_per_market() {
+    let f = Fixture::new();
+    let captain = f.user(0);
+
+    let a1 = f.user(100 * USDC);
+    let b1 = f.user(100 * USDC);
+    let id_a = f.market(&captain, 1_000);
+    f.client().deposit(&a1, &id_a, &SIDE_A, &(10 * USDC));
+    f.client().deposit(&b1, &id_a, &SIDE_B, &(10 * USDC));
+    f.advance_by(DEFAULT_DURATION + 1);
+    f.client().resolve(&id_a, &SIDE_A);
+    f.client().claim(&a1, &id_a, &SIDE_A); // fee = 1 USDC
+
+    let a2 = f.user(100 * USDC);
+    let b2 = f.user(100 * USDC);
+    let id_b = f.market(&captain, 1_000);
+    f.client().deposit(&a2, &id_b, &SIDE_A, &(10 * USDC));
+    f.client().deposit(&b2, &id_b, &SIDE_B, &(20 * USDC));
+    f.advance_by(DEFAULT_DURATION + 1);
+    f.client().resolve(&id_b, &SIDE_A);
+    f.client().claim(&a2, &id_b, &SIDE_A); // profit 20, fee 2 USDC
+
+    assert_eq!(f.client().get_market_fees(&id_a), USDC);
+    assert_eq!(f.client().get_market_fees(&id_b), 2 * USDC);
+    assert_eq!(f.client().get_accrued_fees(), 3 * USDC);
+
+    // Stranger cannot isolate-claim.
+    let stranger = Address::generate(&f.env);
+    let err = f
+        .client()
+        .try_claim_market_fees(&stranger, &id_a)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::NotFeeRecipient);
+
+    // Pull only market A.
+    assert_eq!(
+        f.client().claim_market_fees(&f.fee_recipient, &id_a),
+        USDC
+    );
+    assert_eq!(f.token().balance(&f.fee_recipient), USDC);
+    assert_eq!(f.client().get_market_fees(&id_a), 0);
+    assert_eq!(f.client().get_market_fees(&id_b), 2 * USDC);
+    assert_eq!(f.client().get_accrued_fees(), 2 * USDC);
+    // Escrow still holds market B's fees.
+    assert_eq!(f.escrow_balance(), 2 * USDC);
+
+    // Double-claim on A is rejected; B untouched.
+    let err = f
+        .client()
+        .try_claim_market_fees(&f.fee_recipient, &id_a)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::NoFees);
+    assert_eq!(f.client().get_market_fees(&id_b), 2 * USDC);
+
+    // Pull B in isolation, then global has nothing left.
+    assert_eq!(
+        f.client().claim_market_fees(&f.fee_recipient, &id_b),
+        2 * USDC
+    );
+    assert_eq!(f.client().get_accrued_fees(), 0);
+    assert_eq!(f.escrow_balance(), 0);
+    let err = f.client().try_claim_fees().unwrap_err().unwrap();
+    assert_eq!(err, Error::NoFees);
+}
+
+/// A global `claim_fees` invalidates every per-market ledger so a later
+/// isolated pull cannot double-pay (seq bump, no storage walk).
+#[test]
+fn global_fee_claim_invalidates_per_market_ledgers() {
+    let f = Fixture::new();
+    let captain = f.user(0);
+    let a1 = f.user(100 * USDC);
+    let b1 = f.user(100 * USDC);
+    let id = f.market(&captain, 1_000);
+    f.client().deposit(&a1, &id, &SIDE_A, &(10 * USDC));
+    f.client().deposit(&b1, &id, &SIDE_B, &(10 * USDC));
+    f.advance_by(DEFAULT_DURATION);
+    f.client().resolve(&id, &SIDE_A);
+    f.client().claim(&a1, &id, &SIDE_A);
+
+    assert_eq!(f.client().get_market_fees(&id), USDC);
+    assert_eq!(f.client().claim_fees(), USDC);
+    assert_eq!(f.client().get_market_fees(&id), 0);
+    assert_eq!(f.client().get_accrued_fees(), 0);
+
+    let err = f
+        .client()
+        .try_claim_market_fees(&f.fee_recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::NoFees);
+}
+
+/// Missing market cannot be fee-claimed; zero-fee market reports NoFees.
+#[test]
+fn isolated_fee_claim_rejects_missing_market_and_empty_ledger() {
+    let f = Fixture::new();
+    let captain = f.user(0);
+    let err = f
+        .client()
+        .try_claim_market_fees(&f.fee_recipient, &999)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::MarketNotFound);
+
+    let a1 = f.user(100 * USDC);
+    let b1 = f.user(100 * USDC);
+    let id = f.market(&captain, 0);
+    f.client().deposit(&a1, &id, &SIDE_A, &(10 * USDC));
+    f.client().deposit(&b1, &id, &SIDE_B, &(10 * USDC));
+    f.advance_by(DEFAULT_DURATION);
+    f.client().resolve(&id, &SIDE_A);
+    f.client().claim(&a1, &id, &SIDE_A);
+    assert_eq!(f.client().get_market_fees(&id), 0);
+    let err = f
+        .client()
+        .try_claim_market_fees(&f.fee_recipient, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::NoFees);
+}
+
 #[test]
 fn a_zero_fee_market_accrues_nothing() {
     let f = Fixture::new();

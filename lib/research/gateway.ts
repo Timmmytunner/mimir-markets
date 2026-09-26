@@ -20,6 +20,7 @@
 
 import { lookup } from "node:dns/promises";
 import { sha256Hex } from "@/lib/content-hash";
+import { isPaused } from "@/lib/ops/flags";
 import {
   checkDomainPolicy,
   checkRedirectHopPolicy,
@@ -335,7 +336,7 @@ export async function gatewayFetch(args: GatewayFetchArgs): Promise<FetchResult>
   }
 
   const pausedAgents = new Set((process.env.RESEARCH_PAUSED_AGENT_IDS ?? "").split(",").map((id) => id.trim().toLowerCase()).filter(Boolean));
-  if (process.env.MIMIR_PAUSE_RESEARCH === "1" || pausedAgents.has(args.agentId.trim().toLowerCase())) {
+  if (isPaused("research") || pausedAgents.has(args.agentId.trim().toLowerCase())) {
     return fail({ kind: "paused", detail: `research is paused for agent '${args.agentId}'` });
   }
 

@@ -863,7 +863,7 @@ mimir-markets/
 
 - Node.js 22+
 - A Stellar wallet (Freighter, xBull, Lobstr or Hana) **switched to Testnet**, funded with XLM from [Friendbot via Stellar Lab](https://lab.stellar.org/account/fund) and test USDC from [Circle's faucet](https://faucet.circle.com) — both free
-- Rust + the `stellar` CLI, only if you intend to build or deploy the contracts
+- Rust (via rustup) + the `stellar` CLI, only if you intend to build or deploy the contracts. rustup installs the pinned toolchain from `rust-toolchain.toml` on first use; see [`docs/CONTRACT_TOOLCHAINS.md`](docs/CONTRACT_TOOLCHAINS.md)
 - At least one LLM API key configured in `.env.local`
 - Optional: a Neon account at [console.neon.tech](https://console.neon.tech) for the read-index
 
@@ -1061,7 +1061,7 @@ Every env var lives in `.env.example`. Quick reference:
 | `MIMIR_FEATURE_COPY_TRADING`      | copy routes              | `1` enables copy-trading execution                                                  |
 | `MIMIR_FEATURE_AGENT_BASKETS`     | basket routes            | `1` enables basket composition and following                                        |
 | `MIMIR_FEATURE_FEE_POLICY`        | settlement               | `1` enforces the fee policy; needs the audited `mimir-market` escrow deployed first |
-| `MIMIR_PAUSE_<CAPABILITY>`        | ops                      | `1` pauses one capability (`stake`, `create_market`, `copy_execution`, `x402_selling`, ...); `MIMIR_PAUSE_ALL=1` for all. Withdrawals are never pausable |
+| `MIMIR_PAUSE_<CAPABILITY>`        | ops                      | `1` pauses one capability (`stake`, `create_market`, `copy_execution`, `x402_selling`, ...); `MIMIR_PAUSE_ALL=1` for all. Withdrawals are never pausable. Full list and behavior: [`docs/INCIDENT_KILL_SWITCHES.md`](docs/INCIDENT_KILL_SWITCHES.md) |
 | `MIMIR_DISABLE_CATEGORY_<ID>`     | ops                      | `1` stops new markets in one category without a deploy                              |
 | `SPEND_PERMISSION_SPENDER`        | agent API                | Mimir's spender (`G…` or `C…`) for BYOA spend permissions; unset means funded actions cannot be delegated |
 | `DATABASE_URL`                    | optional (Neon)          | Read-index cache. Pages that need it fail gracefully if absent                     |
@@ -1118,6 +1118,7 @@ Every env var lives in `.env.example`. Quick reference:
 | `npm run typecheck`                          | `tsc --noEmit` across app, workers and scripts                                     |
 | `npm run check:terms`                        | Forbidden-terms lint (keeps pre-Stellar chain names and bespoke-402 residue out)   |
 | `npm run test:contracts`                     | `cargo test --release` over `contracts-soroban`                                     |
+| `npm run check:toolchains`                   | Pinned release toolchain, contract MSRV and CI toolchain matrix agree (no Rust needed) |
 | `npm run workers`                            | Run all agent workers in parallel (Railway entry point: oracle + market-creator + council + sync + traders) |
 | `npm run oracle`                             | Run only the oracle (settler; optionally `AUTO_CHALLENGE=1`)                       |
 | `npm run market-creator`                     | Run only the market-creator                                                        |
@@ -1146,6 +1147,7 @@ Every env var lives in `.env.example`. Quick reference:
 | `npm run test:baskets`                       | Basket validation, virtual NAV and high-water fee suites                           |
 | `npm run test:squad`                         | Squad view and pool suites                                                         |
 | `npm run test:schema`                        | Schema backlog suites                                                              |
+| `npm run test:kill-switches`                 | Every incident kill switch at its enforcement point, offline                       |
 | `npm run warm:vs-index`                      | Rebuild the Neon read-index from current on-chain state                            |
 | `npm run seed` / `npm run seed:dry`          | Seed demo claims (live / dry-run)                                                  |
 | `npx tsx scripts/demo-full-cycle.ts`         | Full create -> challenge -> settle demo in ~90s                                    |
